@@ -21,6 +21,11 @@ const latencies: number[] = [];
 // Handle each server frame: reset the sequence on snapshots, otherwise count sequence gaps, updates and latency.
 ws.on("message", (data: Buffer) => {
   const msg = decodeServerMessage(data);
+  // Session handshake arrives first: log the protocol version and price scale, then wait for the snapshot.
+  if (msg.t === "session") {
+    console.log(`session: v${msg.v}, pxScale=${msg.pxScale}, ${msg.instruments} instruments`);
+    return;
+  }
   if (msg.t === "snapshot") {
     console.log(`snapshot: ${msg.quotes.length} quotes, seq=${msg.seq}, ${data.byteLength} bytes`);
     lastSeq = msg.seq;

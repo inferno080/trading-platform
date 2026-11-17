@@ -2,7 +2,13 @@ import { WebSocketServer, WebSocket } from "ws";
 import { config } from "../config.js";
 import { MarketSimulator } from "../sim/marketSimulator.js";
 import { decodeClientMessage, encodeMessage } from "../protocol/codec.js";
-import type { Delta, Snapshot } from "../protocol/messages.js";
+import {
+  PRICE_SCALE,
+  PROTOCOL_VERSION,
+  type Delta,
+  type Session,
+  type Snapshot,
+} from "../protocol/messages.js";
 
 const sim = new MarketSimulator(config.instruments, config.seed);
 const wss = new WebSocketServer({ port: config.port, perMessageDeflate: false });
@@ -18,6 +24,20 @@ const snapshotFrame = (): Uint8Array => {
   return encodeMessage(msg);
 };
 
+// Handshake message: protocol version, price scale and feed settings.
+const sessionFrame = (): Uint8Array => {
+  const msg: Session = {
+    t: "session",
+    v: PROTOCOL_VERSION,
+    serverTime: Date.now(),
+    instruments: sim.size,
+    pxScale: PRICE_SCALE,
+    tickMs: config.tickMs,
+    updatesPerSecond: config.updatesPerSecond,
+  };
+  return encodeMessage(msg);
+};
+
 const sendSnapshot = (ws: WebSocket): void => {
   const frame = snapshotFrame();
   ws.send(frame, { binary: true });
@@ -26,6 +46,7 @@ const sendSnapshot = (ws: WebSocket): void => {
 
 wss.on("connection", (ws) => {
   ws.binaryType = "nodebuffer";
+  ws.send(sessionFrame(), { binary: true }); // once per connection, always before the snapshot
   sendSnapshot(ws);
   ws.on("message", (data: Buffer) => {
     const msg = decodeClientMessage(data);

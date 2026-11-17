@@ -68,8 +68,9 @@ Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
 
 ### Protocol
 
-All frames are binary MessagePack.
+All frames are binary MessagePack. Prices are fixed-point integers: the real price is the wire value divided by `pxScale` (for example, 187.42 is sent as `18742` when `pxScale` is 100).
 
+- **`session`**: sent once per connection, before the first snapshot, in the style of a FIX Logon. Carries the protocol version (`v`), server time, instrument count, `pxScale`, tick interval and target update rate.
 - **`snapshot`**: sent on connect and on request. Contains every quote (`id`, `sym`, `bid`, `ask`, `bidSz`, `askSz`, `last`, `vol`, `ts`) and the `seq` it is current as of.
 - **`delta`**: one per tick. `seq` increases by exactly 1 per frame. Carries only the quotes that changed, plus the server send time `ts` so clients can measure end-to-end latency.
 - **`resync`** (client to server): requests a fresh snapshot.
@@ -87,10 +88,10 @@ Measured on a development laptop with the smoke client running on the same machi
 | Metric | Value |
 | --- | --- |
 | Updates/sec delivered | about 46-48k (target 50k) |
-| Bandwidth | about 31-32 Mbit/s |
-| Snapshot size | about 448 KB (5,000 quotes) |
-| Latency p50 | 3-5 ms |
-| Latency p99 | 6-44 ms |
+| Bandwidth | about 25 Mbit/s |
+| Snapshot size | about 359 KB (5,000 quotes) |
+| Latency p50 | 3-4 ms |
+| Latency p99 | 5-8 ms |
 | Sequence gaps | 0 |
 
 The shortfall against the 50k target comes from `setInterval` drift; drift-corrected scheduling is a planned fix.

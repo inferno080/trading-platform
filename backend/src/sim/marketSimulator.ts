@@ -1,9 +1,8 @@
-import type { Quote, QuoteUpdate } from "../protocol/messages.js";
+import { PRICE_SCALE, type Quote, type QuoteUpdate } from "../protocol/messages.js";
 import { createRng, type Rng } from "./rng.js";
 
-const TICK_SIZE = 0.01;
-const round = (px: number): number => Math.round(px / TICK_SIZE) * TICK_SIZE;
-const fix = (px: number): number => Number(px.toFixed(2));
+// Prices are integers in 1/PRICE_SCALE units, so one tick (0.01) is exactly 1 unit.
+const MIN_BID = 1 * PRICE_SCALE; // price floor: $1.00
 
 const symbolFor = (i: number): string => {
   // AAA, AAB, ... deterministic 3-4 letter tickers
@@ -25,16 +24,16 @@ export class MarketSimulator {
     this.rng = createRng(seed);
     const now = Date.now();
     this.quotes = Array.from({ length: instrumentCount }, (_, id) => {
-      const mid = 5 + this.rng.next() * 495;
-      const half = TICK_SIZE * (1 + this.rng.int(4));
+      const mid = Math.round((5 + this.rng.next() * 495) * PRICE_SCALE); // $5-$500, in ticks
+      const half = 1 + this.rng.int(4); // half-spread of 1-4 ticks
       return {
         id,
         sym: symbolFor(id),
-        bid: fix(round(mid - half)),
-        ask: fix(round(mid + half)),
+        bid: mid - half,
+        ask: mid + half,
         bidSz: 100 * (1 + this.rng.int(50)),
         askSz: 100 * (1 + this.rng.int(50)),
-        last: fix(round(mid)),
+        last: mid,
         vol: 0,
         ts: now,
       };
@@ -55,14 +54,11 @@ export class MarketSimulator {
     const out: QuoteUpdate[] = new Array(count);
     for (let i = 0; i < count; i++) {
       const q = this.quotes[this.rng.int(this.quotes.length)]!;
-      const mid = (q.bid + q.ask) / 2;
-      // drift: small random price move (bell curve, ~2 ticks); price is floored at $1
-      const drift = this.rng.gauss() * TICK_SIZE * 2;
-      const newMid = Math.max(1, mid + drift);
-      // rebuild bid/ask around the new mid, keeping the spread (at least 1 tick)
-      const half = Math.max(TICK_SIZE, (q.ask - q.bid) / 2);
-      q.bid = fix(round(newMid - half));
-      q.ask = fix(round(newMid + half));
+      // random move in whole ticks (bell curve, ~2 ticks), clamped so bid stays at or above $1
+      const move = Math.max(Math.round(this.rng.gauss() * 2), MIN_BID - q.bid);
+      // shift bid and ask together, so the spread stays the same
+      q.bid += move;
+      q.ask += move;
       q.bidSz = 100 * (1 + this.rng.int(50));
       q.askSz = 100 * (1 + this.rng.int(50));
       // 20% of steps simulate a trade at the bid or ask, adding to volume
