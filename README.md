@@ -2,14 +2,14 @@
 
 A real-time trading dashboard built to explore streaming-data performance in the browser: a separate mock market-data server pushes tens of thousands of quote updates per second over WebSocket into a React UI.
 
-**Status:** backend done; frontend not started.
+**Status:** backend baseline done; frontend has the deliberately naive client and the performance HUD. The optimized pipeline is next.
 
 ## Architecture
 
 ```
 ┌────────────────────┐   WebSocket (MessagePack)   ┌──────────────────────┐
-│  backend (Node/TS) │ ───────────────────────────▶ │  frontend (planned)  │
-│  market simulator  │   snapshot, then deltas      │  React + TypeScript  │
+│  backend (Node/TS) │ ───────────────────────────▶ │  frontend (React/TS) │
+│  market simulator  │   session, snapshot, deltas  │  naive client + HUD  │
 └────────────────────┘                              └──────────────────────┘
 ```
 
@@ -24,7 +24,7 @@ backend/
   src/
     config.ts                 env-driven settings
     protocol/
-      messages.ts             wire types: Snapshot, Delta, Quote, resync request
+      messages.ts             wire types: Session, Snapshot, Delta, Quote, resync request
       codec.ts                MessagePack encode/decode
     sim/
       rng.ts                  seeded PRNG for reproducible runs
@@ -96,9 +96,57 @@ Measured on a development laptop with the smoke client running on the same machi
 
 The shortfall against the 50k target comes from `setInterval` drift; drift-corrected scheduling is a planned fix.
 
+## Frontend
+
+Located in [`frontend/`](frontend/). Vite, React 19, TypeScript, [`react-intl`](https://formatjs.github.io/docs/react-intl/) for i18n, and ESLint with `jsx-a11y`.
+
+```
+frontend/src/
+  protocol/      wire types (mirrored from the backend) and MessagePack codec
+  iterations.ts  registry of frontend iterations, one entry per tab
+  shell/         accessible tab bar and hash routing (#/naive)
+  naive/         the baseline: WebSocket straight into React state, plain table of all rows
+  hud/           performance HUD, metrics collector, and the run recorder
+  i18n/          react-intl setup; en-US messages, and en-GB overrides (only the strings that differ)
+  lib/format.ts  cached Intl.NumberFormat helpers
+  styles/        design tokens (light, dark, high contrast) and base styles
+```
+
+Each version of the frontend is an **iteration**, shown as a tab in the header and linkable by URL (for example `http://localhost:4173/#/naive`). Only the active iteration is mounted, so an inactive one never holds a socket open or competes for CPU during a measurement. Each iteration's page is loaded with a dynamic import, so its code (and any heavy library it uses, such as a grid) is only downloaded when its tab is opened and never inflates another iteration. To add an iteration, build its page and add one entry to `frontend/src/iterations.ts`.
+
+The first iteration, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
+
+### Run it
+
+With the backend running (`cd backend && npm start`):
+
+```bash
+cd frontend
+npm install
+npm run dev          # development server with hot reload (numbers are NOT representative)
+npm run serve:prod   # production build on http://localhost:4173 (use this for benchmarks)
+```
+
+Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`.
+
+Set `VITE_WS_URL` to point at a backend on another address (default `ws://localhost:8080`).
+
+## Benchmarks
+
+The HUD shows live frame rate, worst frame, message and update rates, latency percentiles and sequence gaps. Its **Record run** button measures 30 seconds (after a 3 second warm-up) and downloads a JSON file, which is saved in [`benchmarks/results/`](benchmarks/results/). See [`benchmarks/README.md`](benchmarks/README.md) for how to record a run.
+
+Latency is measured from the server's send timestamp to the moment the browser receives the frame, so it assumes the clocks match (true when everything runs on one machine). When the main thread is busy, frames queue up in the browser, and that queueing shows up in the latency number.
+
+| Pipeline | FPS avg | FPS min | Worst frame | Latency p50 | Latency p99 | Gaps | Result file |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Naive | not yet recorded | | | | | | |
+| Optimized | not built yet | | | | | | |
+
+All runs use 5,000 instruments at 50,000 updates/sec. Record the hardware and browser alongside each run.
+
 ## Roadmap
 
-- [ ] Frontend: naive React client, to capture a baseline
+- [x] Frontend: naive React client, to capture a baseline
 - [ ] Web Worker for the socket and decoding, with per-symbol conflation
 - [ ] Virtualized grid, with cell flash on change and stale-data indicators
 - [ ] Reconnect, gap detection and resync in the UI
