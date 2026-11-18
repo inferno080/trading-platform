@@ -115,7 +115,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci --ignore-scripts
-          npx cypress install
+          ./node_modules/.bin/cypress install # uses the version locked in package-lock.json
           npm run build
           nohup npm run preview -- --port 4173 --strictPort > preview.log 2>&1 &
           for i in $(seq 1 30); do
