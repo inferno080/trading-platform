@@ -139,10 +139,12 @@ Latency is measured from the server's send timestamp to the moment the browser r
 
 | Pipeline | FPS avg | FPS min | Worst frame | Latency p50 | Latency p99 | Gaps | Result file |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Naive | not yet recorded | | | | | | |
+| Naive | 5.8 | 3.0 | 500 ms | 5,012 ms | 9,584 ms | 4 | [2026-11-18T21-00_naive_50k.json](benchmarks/results/2026-11-18T21-00_naive_50k.json) |
 | Optimized | not built yet | | | | | | |
 
-All runs use 5,000 instruments at 50,000 updates/sec. Record the hardware and browser alongside each run.
+All runs use 5,000 instruments at 50,000 updates/sec, in a production build.
+
+**Environment for the Naive run:** Chrome 157 on macOS, 8 logical cores, 1837 x 997 viewport, tab visible for the whole run, built from commit `4f0ddbf` with no uncommitted changes. Naive latency is not a start-up effect: it is the client falling behind a feed it cannot keep up with, which is the point of this baseline.
 
 ## Roadmap
 
