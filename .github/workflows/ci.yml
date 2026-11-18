@@ -97,7 +97,7 @@ jobs:
           cache-dependency-path: |
             backend/package-lock.json
             frontend/package-lock.json
-      - name: Install and start the backend with a light feed
+      - name: Start the backend with a light feed
         working-directory: backend
         env:
           # Few instruments and a low rate keep the page responsive on a shared CI machine.
@@ -106,14 +106,28 @@ jobs:
         run: |
           npm ci --ignore-scripts
           nohup npm start > backend.log 2>&1 &
-      - name: Run end-to-end tests against the production build
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/8080) 2>/dev/null; then echo "backend is up"; exit 0; fi
+            sleep 1
+          done
+          echo "The backend did not start in 30 seconds:"; cat backend.log; exit 1
+      - name: Build and start the app (production build)
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts
+          npx cypress install
+          npm run build
+          nohup npm run preview -- --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:4173/; then echo "app is up"; exit 0; fi
+            sleep 1
+          done
+          echo "The app did not start in 30 seconds:"; cat preview.log; exit 1
+      - name: Run end-to-end tests
         uses: cypress-io/github-action@f790eee7a50d9505912f50c2095510be7de06aa7 # v6.10.9
         with:
           working-directory: frontend
-          build: npm run build
-          start: npm run preview -- --port 4173 --strictPort
-          wait-on: "http://localhost:4173, tcp:localhost:8080"
-          wait-on-timeout: 120
+          install: false # dependencies and the Cypress binary were installed above
       - name: Keep screenshots of failures
         if: failure()
         uses: actions/upload-artifact@v4
@@ -121,9 +135,11 @@ jobs:
           name: e2e-screenshots
           path: frontend/cypress/screenshots
           if-no-files-found: ignore
-      - name: Show the backend log if something failed
+      - name: Show the server logs if something failed
         if: failure()
-        run: cat backend/backend.log
+        run: |
+          echo "--- backend"; cat backend/backend.log || true
+          echo "--- app"; cat frontend/preview.log || true
 
   quality:
     name: Code quality (SonarCloud)
@@ -146,7 +162,7 @@ jobs:
         run: sed -i 's|^SF:|SF:frontend/|' frontend/coverage/lcov.info
       - name: SonarCloud scan and quality gate
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5.3.2
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         with:
           args: -Dsonar.qualitygate.wait=true
       - name: Explain why the scan was skipped
