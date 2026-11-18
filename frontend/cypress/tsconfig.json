@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "cypress",
+      "cypress-real-events",
+      "vite/client",
+      "node"
+    ]
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx",
+    "../cypress.config.ts",
+    "../src/vite-env.d.ts"
+  ]
+}
