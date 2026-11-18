@@ -28,6 +28,36 @@ export interface Recording {
   tabHidden: boolean; // true if the tab was ever hidden during the run
 }
 
+/** What the record button shows. `remaining` counts down within the current phase. */
+export type RecordState =
+  | { status: "idle" }
+  | { status: "recording"; phase: "warmup" | "measuring"; remaining: number }
+  | { status: "done"; fileName: string; tabHidden: boolean };
+
+export type RecordingInProgress = Extract<RecordState, { status: "recording" }>;
+
+/** Count one more second of a run: note if the tab was hidden, and keep the sample once warm-up is over. */
+export function advanceRecording(run: Recording, sample: HudSample, latencies: number[], tabHidden: boolean): void {
+  run.tick++;
+  if (tabHidden) run.tabHidden = true;
+  if (run.tick > WARMUP_SECONDS) {
+    run.samples.push(sample);
+    run.latencies.push(...latencies);
+  }
+}
+
+/**
+ * What the record button should show after `tick` whole seconds of a run, or null once the run is complete.
+ * The label describes the second that is starting now: warm-up first, then a countdown from the full run length.
+ */
+export function recordingStateAfter(tick: number): RecordingInProgress | null {
+  const measured = tick - WARMUP_SECONDS; // measured seconds completed so far (negative during warm-up)
+  if (measured >= RECORD_SECONDS) return null;
+  return tick < WARMUP_SECONDS
+    ? { status: "recording", phase: "warmup", remaining: WARMUP_SECONDS - tick }
+    : { status: "recording", phase: "measuring", remaining: RECORD_SECONDS - measured };
+}
+
 const round = (n: number, decimals = 1): number => Number(n.toFixed(decimals));
 const mean = (xs: number[]): number => (xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length);
 

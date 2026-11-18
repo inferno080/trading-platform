@@ -1,10 +1,9 @@
-import { Suspense, useEffect, type MouseEvent } from "react";
-import { PageSkeleton } from "./components/skeletons";
+import { useEffect, type MouseEvent } from "react";
 import { useLocale } from "./i18n/LocaleContext";
 import { LOCALES, type LocaleCode } from "./i18n/locales";
 import { useT } from "./i18n/useT";
 import { DEFAULT_ITERATION_ID, ITERATIONS, ITERATION_IDS } from "./iterations";
-import { ErrorBoundary } from "./shell/ErrorBoundary";
+import { IterationPanel } from "./shell/IterationPanel";
 import { IterationTabs } from "./shell/IterationTabs";
 import { ThemeSwitch } from "./shell/ThemeSwitch";
 import { useIterationRoute } from "./shell/useIterationRoute";
@@ -51,25 +50,7 @@ export function App() {
       </header>
       <main id="main" tabIndex={-1}>
         {/* Only the active iteration is mounted, so inactive ones never hold a socket or compete for CPU. */}
-        <div className="panel" role="tabpanel" id={`panel-${active.id}`} aria-labelledby={`tab-${active.id}`}>
-          <p className="iteration-description">{t(active.descriptionId)}</p>
-          {/* Keyed by iteration, so switching tabs clears any load error from the previous one. */}
-          <ErrorBoundary
-            key={active.id}
-            fallback={
-              <div role="alert">
-                <p>{t("error.loadView")}</p>
-                <button type="button" onClick={() => window.location.reload()}>
-                  {t("error.reload")}
-                </button>
-              </div>
-            }
-          >
-            <Suspense fallback={<PageSkeleton />}>
-              <active.Page />
-            </Suspense>
-          </ErrorBoundary>
-        </div>
+        <IterationPanel iteration={active} />
       </main>
     </>
   );

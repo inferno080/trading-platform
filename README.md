@@ -1,5 +1,7 @@
 # trading-platform
 
+[![CI](https://github.com/inferno080/trading-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/inferno080/trading-platform/actions/workflows/ci.yml)
+
 A real-time trading dashboard built to explore streaming-data performance in the browser: a separate mock market-data server pushes tens of thousands of quote updates per second over WebSocket into a React UI.
 
 **Status:** backend baseline done; frontend has the deliberately naive client and the performance HUD. The optimized pipeline is next.
@@ -127,7 +129,7 @@ npm run dev          # development server with hot reload (numbers are NOT repre
 npm run serve:prod   # production build on http://localhost:4173 (use this for benchmarks)
 ```
 
-Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`.
+Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`. Test scripts are listed under [Testing and code quality](#testing-and-code-quality).
 
 Set `VITE_WS_URL` to point at a backend on another address (default `ws://localhost:8080`).
 
@@ -145,6 +147,58 @@ Latency is measured from the server's send timestamp to the moment the browser r
 All runs use 5,000 instruments at 50,000 updates/sec, in a production build.
 
 **Environment for the Naive run:** Chrome 157 on macOS, 8 logical cores, 1837 x 997 viewport, tab visible for the whole run, built from commit `4f0ddbf` with no uncommitted changes. Naive latency is not a start-up effect: it is the client falling behind a feed it cannot keep up with, which is the point of this baseline.
+
+## Testing and code quality
+
+Every frontend feature ships with tests, and CI (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs everything on each push and pull request. The frontend is tested with **Cypress only**: component tests for the logic and components, and end-to-end tests for the real app. The backend is a development mock with no automated tests by design; CI type-checks it and audits its dependencies.
+
+```
+frontend/cypress/
+  component/   component and hook tests, mirroring src/ (coverage is measured here)
+  e2e/         the built app talking to the real backend, plus accessibility checks
+  support/     shared helpers: a fake WebSocket, a controllable matchMedia, fixtures
+```
+
+Run them from `frontend/`:
+
+| Command | What it does |
+| --- | --- |
+| `npm run test:ct` | Component tests, with Istanbul coverage collected into `frontend/coverage/` |
+| `npm run test:e2e` | End-to-end tests (needs the setup below) |
+| `npm run cy:open` | Cypress's interactive runner |
+| `npm run lint` | ESLint, including accessibility, React hooks and SonarJS code-smell rules |
+
+### Coverage
+
+Coverage is collected with [Istanbul](https://istanbul.js.org/) during the component tests, over everything in `frontend/src` except the bootstrap file `main.tsx`. A test loads every source module, so a file nobody exercises counts as uncovered instead of being skipped. The HTML report is written to `frontend/coverage/`, and the `lcov.info` file in it is sent to SonarCloud in CI. Coverage is checked by SonarCloud's Sonar way quality gate, through its **Coverage on New Code** condition (80% at the time of writing; the current value is shown under Quality Gates on [sonarcloud.io](https://sonarcloud.io)). See [Code quality gate](#code-quality-gate).
+
+### End-to-end tests
+
+They exercise the production build against the real backend, so start both first, with a light feed so the page stays responsive:
+
+```bash
+cd backend && INSTRUMENTS=200 UPDATES_PER_SEC=500 npm start      # terminal 1
+cd frontend && npm run build && npm run preview -- --port 4173    # terminal 2
+cd frontend && npm run test:e2e                                   # terminal 3
+```
+
+They cover the live table, loading and error states, navigation and keyboard use, the theme and language settings (including that they persist), a full real-time benchmark recording, and an automated WCAG 2.2 AA scan with [axe](https://github.com/dequelabs/axe-core) in both themes and both languages. The end-to-end run takes about a minute because the recording test runs in real time.
+
+An automated scan finds only part of the accessibility problems. A manual pass with a screen reader is still needed.
+
+### Code quality gate
+
+Code quality is judged by SonarCloud's default **Sonar way** quality gate; this project adds no custom conditions of its own (custom gates are a paid SonarCloud feature). Sonar way looks at new and changed code: ratings for reliability, security and maintainability, test coverage, duplication and reviewed security hotspots. The exact current conditions are shown under Quality Gates on [sonarcloud.io](https://sonarcloud.io).
+
+- **In CI:** the `quality` job sends the code and the frontend coverage report to SonarCloud and waits for the gate. It runs when the `SONAR_TOKEN` repository secret exists; without it the job says it was skipped. The project key and organization are in [`sonar-project.properties`](sonar-project.properties).
+- **Coverage:** SonarCloud reads the frontend coverage report only, so the backend, which has no tests, is excluded from the coverage figure.
+- **Also checked before SonarCloud sees the code:** TypeScript strict mode, ESLint with [SonarJS](https://github.com/SonarSource/SonarJS) rules, a complexity limit of 12 per function, and `npm audit` on runtime dependencies.
+- **One-time SonarCloud setup:** create the project, turn **Automatic Analysis** off (it conflicts with the CI scan), and add the analysis token as the `SONAR_TOKEN` repository secret.
+
+### Troubleshooting
+
+- **Cypress fails to start with `bad option: --no-sandbox`:** the `ELECTRON_RUN_AS_NODE` environment variable is set, which VS Code does for processes it launches. Run Cypress from a normal terminal, or prefix the command with `env -u ELECTRON_RUN_AS_NODE`.
+- **Node version:** CI uses Node 22. Cypress 15 and Vite 6 are used on purpose; Cypress 16 requires Vite 8, which needs a newer Node.
 
 ## Roadmap
 
