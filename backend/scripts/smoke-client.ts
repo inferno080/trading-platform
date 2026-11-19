@@ -21,20 +21,24 @@ const latencies: number[] = [];
 // Handle each server frame: reset the sequence on snapshots, otherwise count sequence gaps, updates and latency.
 ws.on("message", (data: Buffer) => {
   const msg = decodeServerMessage(data);
-  // Session handshake arrives first: log the protocol version and price scale, then wait for the snapshot.
-  if (msg.t === "session") {
-    console.log(`session: v${msg.v}, pxScale=${msg.pxScale}, ${msg.instruments} instruments`);
-    return;
+  switch (msg.t) {
+    case "session":
+      // Session handshake arrives first: log the protocol version, then wait for the snapshot.
+      console.log(`session: v${msg.v}, ${msg.instruments} instruments`);
+      break;
+    case "snapshot":
+      console.log(`snapshot: ${msg.quotes.length} quotes, seq=${msg.seq}, ${data.byteLength} bytes`);
+      lastSeq = msg.seq;
+      break;
+    case "delta":
+      if (lastSeq >= 0 && msg.seq !== lastSeq + 1) gaps++;
+      lastSeq = msg.seq;
+      updates += msg.updates.length;
+      latencies.push(Date.now() - msg.ts);
+      break;
+    case "reference":
+      break; // only sent to clients that ask for it; this one never does
   }
-  if (msg.t === "snapshot") {
-    console.log(`snapshot: ${msg.quotes.length} quotes, seq=${msg.seq}, ${data.byteLength} bytes`);
-    lastSeq = msg.seq;
-    return;
-  }
-  if (lastSeq >= 0 && msg.seq !== lastSeq + 1) gaps++;
-  lastSeq = msg.seq;
-  updates += msg.updates.length;
-  latencies.push(Date.now() - msg.ts);
 });
 
 /**

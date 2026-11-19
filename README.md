@@ -31,6 +31,7 @@ backend/
     sim/
       rng.ts                  seeded PRNG for reproducible runs
       marketSimulator.ts      in-memory random-walk market with skewed (Zipf) activity
+      instruments.ts          the instrument groups (currency, decimals, tick size) and their names
     server/
       index.ts                WebSocket server, tick loop, fan-out, stats log
       ticker.ts               drift-free timer (keeps an absolute schedule)
@@ -74,16 +75,17 @@ Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
 
 ### Update distribution
 
-Real markets are uneven, so by default the simulator is too. The symbol at rank *r* gets weight `1 / r^skew` (Zipf's law), and symbol 0 (`AAA`) is the most active. With the default skew of 1 and the default load, `AAA` alone gets about 11% of all updates (about 5,500 a second), the ten hottest symbols get about 32%, and the quietest half of the symbols together get about 7%. That is what makes conflation (keeping only the latest update per symbol per frame) worth measuring. With `ACTIVITY_SKEW=0` every symbol gets about 10 updates a second, and the same seed reproduces the old uniform sequence exactly.
+Real markets are uneven, so by default the simulator is too. The symbol at rank *r* gets weight `1 / r^skew` (Zipf's law), and symbol 0 (`AAA`) is the most active. With the default skew of 1 and the default load, `AAA` alone gets about 11% of all updates (about 5,500 a second), the ten hottest symbols get about 32%, and the quietest half of the symbols together get about 7%. That is what makes conflation (keeping only the latest update per symbol per frame) worth measuring. With `ACTIVITY_SKEW=0` every symbol gets about 10 updates a second.
 
 ### Protocol
 
-All frames are binary MessagePack. Prices are fixed-point integers: the real price is the wire value divided by `pxScale` (for example, 187.42 is sent as `18742` when `pxScale` is 100).
+All frames are binary MessagePack. Prices are fixed-point integers in **each instrument's own scale**: the real price is the wire value divided by `10^decimals`, where `decimals` comes from that instrument's reference data (for example, a USD equity with 2 decimals sends 187.42 as `18742`, and a yen equity with 0 decimals sends 47,213 as `47213`). The current protocol version is **2**; version 1 used one global scale for every instrument.
 
-- **`session`**: sent once per connection, before the first snapshot, in the style of a FIX Logon. Carries the protocol version (`v`), server time, instrument count, `pxScale`, tick interval and target update rate.
+- **`session`**: sent once per connection, before the first snapshot, in the style of a FIX Logon. Carries the protocol version (`v`), server time, instrument count, tick interval and target update rate.
 - **`snapshot`**: sent on connect and on request. Contains every quote (`id`, `sym`, `bid`, `ask`, `bidSz`, `askSz`, `last`, `vol`, `ts`) and the `seq` it is current as of.
 - **`delta`**: one per tick. `seq` increases by exactly 1 per frame. Carries only the quotes that changed, plus the server send time `ts` so clients can measure end-to-end latency.
 - **`resync`** (client to server): requests a fresh snapshot.
+- **`reference`** (client to server, then server to that client): `{ t: "reference" }` asks for the reference data, and the server replies with `{ t: "reference", instruments: [...] }`. It is opt-in, so a client that never asks sees exactly the stream it would have seen without this feature. See [Instruments and reference data](#instruments-and-reference-data).
 - **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
 
 Clients detect a gap when `seq` skips, and respond by sending `resync`.
@@ -91,6 +93,30 @@ Clients detect a gap when `seq` skips, and respond by sending `resync`.
 ### Backpressure
 
 Each frame is encoded once and sent to every client. If a client's socket buffer exceeds `MAX_BUFFERED_BYTES`, the server skips frames for that client instead of letting memory grow. The client sees the sequence gap and resyncs.
+
+### Instruments and reference data
+
+The simulator has four groups of instruments, so the feed has to deal with different currencies, decimals and tick sizes, as a real multi-asset market does. The group is decided by the last digit of the instrument id, and the most active instruments (lowest ids) are USD equities.
+
+| Group | Share | Currency | Decimals | Tick size | Starting price |
+| --- | --- | --- | --- | --- | --- |
+| USD equities | 60% | USD | 2 | 0.01 | 5 to 500 |
+| EUR equities | 10% | EUR | 3 | 0.005 | 5 to 500 |
+| JPY equities | 20% | JPY | 0 | 1 | 500 to 50,000 |
+| FX-style | 10% | USD | 4 | 0.0001 | 0.5 to 2 |
+
+Every price sits on a multiple of its tick, and the spread between bid and ask never changes. A client asks for the static facts about every instrument with a `reference` message and gets one entry each:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | The instrument id used in snapshots and deltas |
+| `name` | A fictional company or currency-pair name. Names are not unique; the symbol is the identifier. |
+| `currency` | ISO currency code |
+| `tickSize` | The smallest allowed price move, as a real price (for example `0.005`) |
+| `decimals` | Decimal places of a price, which also sets the wire scale (`10^decimals`) |
+| `prevClose` | The previous close as a wire integer, so CHG% is `price / prevClose - 1` |
+
+The previous close is the starting price moved by about 1% (never more than 5%), so CHG% starts spread around zero. The reference data is about 420 KB, is encoded once, and is sent only to a client that asks.
 
 ### Chaos commands
 
@@ -180,7 +206,7 @@ Latency is measured from the server's send timestamp to the moment the browser r
 
 All runs use 5,000 instruments at a 50,000 updates/sec target, in a production build.
 
-**The Naive row predates the drift-free server timer.** It was recorded when the server delivered about 47.7k updates/sec instead of 50k, and before the skewed symbol activity added later in Day 2. It will be re-recorded against the final Day 2 backend, in the same session as the Optimized runs, so both pipelines are compared on the same server.
+**The Naive row is an early, interim result.** It was recorded against the first version of the backend (before the drift-free timer, skewed activity and later changes). The real comparison happens once, at the end of the project: Naive, Optimized and the grid version are all recorded in the same session, on the same machine, against the final backend, and this table is replaced with those numbers.
 
 **Environment for the Naive run:** Chrome 157 on macOS, 8 logical cores, 1837 x 997 viewport, tab visible for the whole run, built from commit `4f0ddbf` with no uncommitted changes. Naive latency is not a start-up effect: it is the client falling behind a feed it cannot keep up with, which is the point of this baseline.
 

@@ -5,7 +5,6 @@ import { decodeClientMessage, encodeMessage } from "../protocol/codec.js";
 import { Chaos } from "./chaos.js";
 import { startTicker } from "./ticker.js";
 import {
-  PRICE_SCALE,
   PROTOCOL_VERSION,
   type Delta,
   type Session,
@@ -14,6 +13,8 @@ import {
 
 const sim = new MarketSimulator(config.instruments, config.seed, config.activitySkew);
 const wss = new WebSocketServer({ port: config.port, perMessageDeflate: false });
+// The reference data never changes, so it is encoded once and the same bytes are sent to each client that asks.
+const referenceFrame = encodeMessage({ t: "reference", instruments: sim.reference() });
 
 const chaos = new Chaos();
 let seq = 0;
@@ -34,11 +35,16 @@ const sessionFrame = (): Uint8Array => {
     v: PROTOCOL_VERSION,
     serverTime: Date.now(),
     instruments: sim.size,
-    pxScale: PRICE_SCALE,
     tickMs: config.tickMs,
     updatesPerSecond: config.updatesPerSecond,
   };
   return encodeMessage(msg);
+};
+
+// Reply to a { t: "reference" } request. Only the requesting client gets it, so everyone else's stream is unchanged.
+const sendReference = (ws: WebSocket): void => {
+  ws.send(referenceFrame, { binary: true });
+  bytesSent += referenceFrame.byteLength;
 };
 
 const sendSnapshot = (ws: WebSocket): void => {
@@ -67,6 +73,9 @@ wss.on("connection", (ws) => {
     switch (msg.t) {
       case "resync":
         sendSnapshot(ws);
+        break;
+      case "reference":
+        sendReference(ws);
         break;
       case "chaos":
         console.log(`chaos: ${chaos.handle(msg, Date.now(), dropAllConnections)}`);

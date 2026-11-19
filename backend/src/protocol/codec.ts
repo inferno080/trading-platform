@@ -14,7 +14,7 @@ export const decodeServerMessage = (data: Uint8Array): ServerMessage =>
 const isClientMessage = (value: unknown): value is ClientMessage => {
   if (typeof value !== "object" || value === null) return false;
   const { t, action, value: argument } = value as { t?: unknown; action?: unknown; value?: unknown };
-  if (t === "resync") return true;
+  if (t === "resync" || t === "reference") return true;
   const knownAction = CHAOS_ACTIONS.includes(action as ChaosAction);
   const validArgument = argument === undefined || (typeof argument === "number" && Number.isFinite(argument));
   return t === "chaos" && knownAction && validArgument;
