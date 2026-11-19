@@ -178,6 +178,8 @@ Each version of the frontend is an **iteration**, shown as a tab in the header a
 
 The first iteration, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
 
+The Naive table shows fourteen columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, volume, tick size and decimals. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The same columns will appear in the optimized versions, so every version does the same visible work and the benchmark compares like with like.
+
 ### Run it
 
 With the backend running (`cd backend && npm start`):

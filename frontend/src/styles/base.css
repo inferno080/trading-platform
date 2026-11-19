@@ -308,8 +308,9 @@ td {
   text-align: end;
 }
 th:first-child,
-td:first-child {
-  text-align: start;
+td:first-child,
+.text-col {
+  text-align: start; /* the symbol, name and currency are text, not numbers */
 }
 
 @media (prefers-reduced-motion: reduce) {

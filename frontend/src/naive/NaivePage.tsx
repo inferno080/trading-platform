@@ -7,7 +7,7 @@ import { useNaiveFeed } from "./useNaiveFeed";
 /** The naive iteration: owns its own feed, so it only holds a socket open while its tab is active. */
 export function NaivePage() {
   const t = useT();
-  const { status, session, quotes, badVersion } = useNaiveFeed();
+  const { status, session, quotes, reference, referenceMissing, badVersion } = useNaiveFeed();
 
   return (
     <>
@@ -18,8 +18,9 @@ export function NaivePage() {
       {badVersion !== null && (
         <p role="alert">{t("error.protocol", { version: badVersion, expected: PROTOCOL_VERSION })}</p>
       )}
+      {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
       <Hud session={session} mode="naive" />
-      <QuotesTable quotes={quotes} pxScale={session?.pxScale ?? 100} />
+      <QuotesTable quotes={quotes} reference={reference} />
     </>
   );
 }
