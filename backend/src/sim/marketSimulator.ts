@@ -19,9 +19,19 @@ const symbolFor = (i: number): string => {
 export class MarketSimulator {
   private readonly quotes: Quote[];
   private readonly rng: Rng;
+  // Running total of each instrument's activity weight: cumulativeWeight[i] = weight(0) + ... + weight(i).
+  // Picking a random point along this total and finding where it lands picks instruments in proportion to weight.
+  private readonly cumulativeWeight: Float64Array;
 
-  constructor(instrumentCount: number, seed: number) {
+  /** `activitySkew`: 0 makes every instrument equally active; 1 (default) makes a few very active (see config). */
+  constructor(instrumentCount: number, seed: number, activitySkew = 1) {
     this.rng = createRng(seed);
+    this.cumulativeWeight = new Float64Array(instrumentCount);
+    let running = 0;
+    for (let i = 0; i < instrumentCount; i++) {
+      running += Math.pow(i + 1, -activitySkew); // weight of the instrument at rank i + 1 is 1 / rank^skew
+      this.cumulativeWeight[i] = running;
+    }
     const now = Date.now();
     this.quotes = Array.from({ length: instrumentCount }, (_, id) => {
       const mid = Math.round((5 + this.rng.next() * 495) * PRICE_SCALE); // $5-$500, in ticks
@@ -49,11 +59,25 @@ export class MarketSimulator {
     return this.quotes.map((q) => ({ ...q }));
   }
 
-  /** Mutate `count` random instruments and return what changed. */
+  /** Pick one instrument at random, more often the more active ones (binary search over the running total). */
+  private pickInstrument(): Quote {
+    const total = this.cumulativeWeight[this.cumulativeWeight.length - 1]!;
+    const target = this.rng.next() * total; // a random point along the running total
+    let low = 0;
+    let high = this.cumulativeWeight.length - 1;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (this.cumulativeWeight[middle]! > target) high = middle;
+      else low = middle + 1;
+    }
+    return this.quotes[low]!; // the first instrument whose running total passes the point
+  }
+
+  /** Mutate `count` instruments (the more active ones more often) and return what changed. */
   step(count: number, now: number): QuoteUpdate[] {
     const out: QuoteUpdate[] = new Array(count);
     for (let i = 0; i < count; i++) {
-      const q = this.quotes[this.rng.int(this.quotes.length)]!;
+      const q = this.pickInstrument();
       // random move in whole ticks (bell curve, ~2 ticks), clamped so bid stays at or above $1
       const move = Math.max(Math.round(this.rng.gauss() * 2), MIN_BID - q.bid);
       // shift bid and ask together, so the spread stays the same

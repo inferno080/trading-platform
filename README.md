@@ -30,11 +30,14 @@ backend/
       codec.ts                MessagePack encode/decode
     sim/
       rng.ts                  seeded PRNG for reproducible runs
-      marketSimulator.ts      in-memory random-walk market
+      marketSimulator.ts      in-memory random-walk market with skewed (Zipf) activity
     server/
       index.ts                WebSocket server, tick loop, fan-out, stats log
+      ticker.ts               drift-free timer (keeps an absolute schedule)
+      chaos.ts                fault-injection state and the commands that change it
   scripts/
     smoke-client.ts           headless client: checks seq gaps and latency
+    chaos.ts                  command-line tool that sends a chaos command to a running server
 ```
 
 ### Run it
@@ -65,8 +68,13 @@ Set through environment variables:
 | `TICK_MS` | `20` | Simulator tick interval; one delta frame is sent per tick |
 | `MAX_BUFFERED_BYTES` | `4194304` | Per-client socket buffer limit before frames are dropped |
 | `SEED` | `42` | PRNG seed |
+| `ACTIVITY_SKEW` | `1` | How unevenly updates are spread over the symbols: `0` = all equally active, `1` = a few hot symbols produce most of the updates |
 
 Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
+
+### Update distribution
+
+Real markets are uneven, so by default the simulator is too. The symbol at rank *r* gets weight `1 / r^skew` (Zipf's law), and symbol 0 (`AAA`) is the most active. With the default skew of 1 and the default load, `AAA` alone gets about 11% of all updates (about 5,500 a second), the ten hottest symbols get about 32%, and the quietest half of the symbols together get about 7%. That is what makes conflation (keeping only the latest update per symbol per frame) worth measuring. With `ACTIVITY_SKEW=0` every symbol gets about 10 updates a second, and the same seed reproduces the old uniform sequence exactly.
 
 ### Protocol
 
@@ -76,6 +84,7 @@ All frames are binary MessagePack. Prices are fixed-point integers: the real pri
 - **`snapshot`**: sent on connect and on request. Contains every quote (`id`, `sym`, `bid`, `ask`, `bidSz`, `askSz`, `last`, `vol`, `ts`) and the `seq` it is current as of.
 - **`delta`**: one per tick. `seq` increases by exactly 1 per frame. Carries only the quotes that changed, plus the server send time `ts` so clients can measure end-to-end latency.
 - **`resync`** (client to server): requests a fresh snapshot.
+- **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
 
 Clients detect a gap when `seq` skips, and respond by sending `resync`.
 
@@ -83,20 +92,45 @@ Clients detect a gap when `seq` skips, and respond by sending `resync`.
 
 Each frame is encoded once and sent to every client. If a client's socket buffer exceeds `MAX_BUFFERED_BYTES`, the server skips frames for that client instead of letting memory grow. The client sees the sequence gap and resyncs.
 
+### Chaos commands
+
+The server can be told to misbehave on purpose, so you can watch how a client copes. Commands affect **every connected client**, not just the sender, which is what lets a second terminal disturb your browser tab. This is a local development server with no authentication, so any connected client can send them.
+
+Send one from a second terminal while the backend runs:
+
+```bash
+cd backend
+npm run chaos -- pause          # freeze the feed
+npm run chaos -- latency 500    # delay every frame by 500 ms
+npm run chaos -- reset          # clear every fault
+```
+
+| Action | What the server does | What a client should notice |
+| --- | --- | --- |
+| `pause` | Stops making updates and stops using sequence numbers | No frames at all; the feed goes stale. After `resume` the sequence continues with no gap. |
+| `resume` | Ends a pause | Frames flow again |
+| `gap` | Creates the next frame and counts it, but never sends it | A jump in the sequence, so the client must ask for a snapshot |
+| `drop` | Abruptly closes every connection, like a network failure | The socket closes |
+| `burst [seconds]` | Sends 5x the normal updates per frame (default 5 seconds, at most 60) | A flood: about 250,000 updates a second at the default load |
+| `latency <ms>` | Holds every frame back by that long (at most 5,000 ms); `0` removes it | Latency figures rise by that amount. Frames still arrive in order. |
+| `reset` | Clears every fault | Normal service |
+
+While a fault is active, the server's once-a-second log line ends with `chaos=[...]`, for example `chaos=[latency=500ms]`. Each command also logs one line saying what it did. Point the tool at another server with `URL=ws://host:port npm run chaos -- pause`.
+
 ### Measured (local, one client, default settings)
 
 Measured on a development laptop with the smoke client running on the same machine, so treat these as a baseline, not a benchmark.
 
 | Metric | Value |
 | --- | --- |
-| Updates/sec delivered | about 46-48k (target 50k) |
-| Bandwidth | about 25 Mbit/s |
+| Updates/sec delivered | 50,000 (target 50k) |
+| Bandwidth | about 26 Mbit/s |
 | Snapshot size | about 359 KB (5,000 quotes) |
 | Latency p50 | 3-4 ms |
 | Latency p99 | 5-8 ms |
 | Sequence gaps | 0 |
 
-The shortfall against the 50k target comes from `setInterval` drift; drift-corrected scheduling is a planned fix.
+The server uses a drift-free timer (`ticker.ts`): it keeps an absolute schedule instead of waiting a full interval after each tick, so the delivered rate matches the target. With plain `setInterval` it delivered about 47.7k a second, because every small delay added up.
 
 ## Frontend
 
@@ -144,7 +178,9 @@ Latency is measured from the server's send timestamp to the moment the browser r
 | Naive | 5.8 | 3.0 | 500 ms | 5,012 ms | 9,584 ms | 4 | [2026-11-18T21-00_naive_50k.json](benchmarks/results/2026-11-18T21-00_naive_50k.json) |
 | Optimized | not built yet | | | | | | |
 
-All runs use 5,000 instruments at 50,000 updates/sec, in a production build.
+All runs use 5,000 instruments at a 50,000 updates/sec target, in a production build.
+
+**The Naive row predates the drift-free server timer.** It was recorded when the server delivered about 47.7k updates/sec instead of 50k, and before the skewed symbol activity added later in Day 2. It will be re-recorded against the final Day 2 backend, in the same session as the Optimized runs, so both pipelines are compared on the same server.
 
 **Environment for the Naive run:** Chrome 157 on macOS, 8 logical cores, 1837 x 997 viewport, tab visible for the whole run, built from commit `4f0ddbf` with no uncommitted changes. Naive latency is not a start-up effect: it is the client falling behind a feed it cannot keep up with, which is the point of this baseline.
 
@@ -208,4 +244,4 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 - [ ] Reconnect, gap detection and resync in the UI
 - [ ] Performance HUD: FPS, messages/sec, latency percentiles, long tasks, heap
 - [ ] Backend: L2 depth, trades stream, per-symbol subscribe, chaos controls
-- [ ] Drift-corrected simulator timing
+- [x] Drift-corrected simulator timing

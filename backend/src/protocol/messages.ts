@@ -61,4 +61,18 @@ export interface ResyncRequest {
   t: "resync";
 }
 
-export type ClientMessage = ResyncRequest;
+/** The faults a client can ask the server to inject. */
+export const CHAOS_ACTIONS = ["pause", "resume", "gap", "drop", "burst", "latency", "reset"] as const;
+export type ChaosAction = (typeof CHAOS_ACTIONS)[number];
+
+/**
+ * Asks the server to misbehave on purpose (fault injection), so a client's recovery can be tested.
+ * `value` is the optional argument some actions take: seconds for `burst`, milliseconds for `latency`.
+ */
+export interface ChaosCommand {
+  t: "chaos";
+  action: ChaosAction;
+  value?: number;
+}
+
+export type ClientMessage = ResyncRequest | ChaosCommand;
