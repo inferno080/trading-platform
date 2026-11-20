@@ -1,8 +1,12 @@
 /** Minimal headless client: verifies snapshot + contiguous deltas, prints rate and latency. */
 import WebSocket from "ws";
-import { decodeServerMessage } from "../src/protocol/codec.js";
+import { decodeServerMessage, encodeClientMessage } from "../src/protocol/codec.js";
 
 const url = process.env.URL ?? "ws://localhost:8080";
+// SUBSCRIBE=<id> (or several, comma separated) also asks for those instruments' depth ladder and trades;
+// HISTORY=<id> asks for that instrument's price history once.
+const subscribeIds = (process.env.SUBSCRIBE ?? "").split(",").filter(Boolean).map(Number);
+const historyId = process.env.HISTORY === undefined ? null : Number(process.env.HISTORY);
 const ws = new WebSocket(url);
 ws.binaryType = "nodebuffer";
 
@@ -16,7 +20,14 @@ ws.binaryType = "nodebuffer";
 let lastSeq = -1;
 let gaps = 0;
 let updates = 0;
+let depths = 0;
+let trades = 0;
 const latencies: number[] = [];
+
+ws.on("open", () => {
+  for (const id of subscribeIds) ws.send(encodeClientMessage({ t: "subscribe", id }));
+  if (historyId !== null) ws.send(encodeClientMessage({ t: "history", id: historyId }));
+});
 
 // Handle each server frame: reset the sequence on snapshots, otherwise count sequence gaps, updates and latency.
 ws.on("message", (data: Buffer) => {
@@ -38,6 +49,18 @@ ws.on("message", (data: Buffer) => {
       break;
     case "reference":
       break; // only sent to clients that ask for it; this one never does
+    case "depth":
+      depths++;
+      break;
+    case "trades":
+      trades += msg.trades.length;
+      break;
+    case "history":
+      console.log(`history: instrument ${msg.id}, ${msg.points.length} points, last price ${msg.points.at(-1)?.[1]}`);
+      break;
+    case "rejected":
+      console.log(`rejected: ${msg.request} of instrument ${msg.id} (${msg.reason})`);
+      break;
   }
 });
 
@@ -48,7 +71,10 @@ ws.on("message", (data: Buffer) => {
 setInterval(() => {
   latencies.sort((a, b) => a - b);
   const p = (q: number) => latencies[Math.floor(latencies.length * q)] ?? 0;
-  console.log(`updates/s=${updates} gaps=${gaps} latency p50=${p(0.5)}ms p99=${p(0.99)}ms`);
+  const watching = subscribeIds.length > 0 ? ` depth/s=${depths} trades/s=${trades}` : "";
+  console.log(`updates/s=${updates} gaps=${gaps} latency p50=${p(0.5)}ms p99=${p(0.99)}ms${watching}`);
   updates = 0;
+  depths = 0;
+  trades = 0;
   latencies.length = 0;
 }, 1000);

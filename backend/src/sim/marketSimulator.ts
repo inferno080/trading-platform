@@ -1,4 +1,5 @@
-import type { InstrumentReference, Quote, QuoteUpdate } from "../protocol/messages.js";
+import type { DepthLevel, InstrumentReference, Quote, QuoteUpdate, Trade } from "../protocol/messages.js";
+import { buildDepth } from "./depth.js";
 import { INSTRUMENT_CLASSES, classIndexFor, nameFor } from "./instruments.js";
 import { createRng, type Rng } from "./rng.js";
 
@@ -21,10 +22,20 @@ const symbolFor = (i: number): string => {
   return s.padStart(3, "A");
 };
 
+/** A trade, and which instrument it was in. */
+export interface TradeEvent extends Trade {
+  id: number;
+}
+
 /** In-memory random-walk market. Owns the authoritative current quote per instrument. */
 export class MarketSimulator {
   private readonly quotes: Quote[];
   private readonly rng: Rng;
+  // Used only to make up past prices for the price history. It is separate from `rng` so that asking for history
+  // never changes the sequence of live prices (the same seed still gives the same market).
+  private readonly historyRng: Rng;
+  private readonly watched = new Set<number>(); // instruments someone subscribed to: only their trades are recorded
+  private trades: TradeEvent[] = []; // trades of watched instruments since the last takeTrades()
   // Running total of each instrument's activity weight: cumulativeWeight[i] = weight(0) + ... + weight(i).
   // Picking a random point along this total and finding where it lands picks instruments in proportion to weight.
   private readonly cumulativeWeight: Float64Array;
@@ -37,6 +48,7 @@ export class MarketSimulator {
   /** `activitySkew`: 0 makes every instrument equally active; 1 (default) makes a few very active (see config). */
   constructor(instrumentCount: number, seed: number, activitySkew = 1) {
     this.rng = createRng(seed);
+    this.historyRng = createRng(seed ^ 0x5bd1e995);
     this.cumulativeWeight = new Float64Array(instrumentCount);
     let running = 0;
     for (let i = 0; i < instrumentCount; i++) {
@@ -87,6 +99,45 @@ export class MarketSimulator {
     return this.references.map((r) => ({ ...r }));
   }
 
+  /** Start recording the trades of this instrument. */
+  watch(id: number): void {
+    this.watched.add(id);
+  }
+
+  /** Stop recording the trades of this instrument. */
+  unwatch(id: number): void {
+    this.watched.delete(id);
+  }
+
+  /** The trades of watched instruments since the last call, oldest first. */
+  takeTrades(): TradeEvent[] {
+    const out = this.trades;
+    this.trades = [];
+    return out;
+  }
+
+  /** The order book of one instrument (see buildDepth). */
+  depth(id: number, levels: number): { bids: DepthLevel[]; asks: DepthLevel[] } {
+    return buildDepth(this.quotes[id]!, this.tickUnits[id]!, levels);
+  }
+
+  /** The last traded price of one instrument, as a wire integer. */
+  lastPrice(id: number): number {
+    return this.quotes[id]!.last;
+  }
+
+  /** Made-up past last prices of one instrument, oldest first, ending at its current price: a random walk run backwards. */
+  backfillSeries(id: number, points: number): number[] {
+    const series = new Array<number>(points);
+    let price = this.quotes[id]!.last;
+    for (let i = points - 1; i >= 0; i--) {
+      series[i] = price;
+      const move = Math.round(this.historyRng.gauss() * 1.5) * this.tickUnits[id]!; // whole ticks, so prices stay on the grid
+      price = Math.max(this.minBids[id]!, price - move);
+    }
+    return series;
+  }
+
   /** Deep copy of current state, for snapshots. */
   snapshot(): Quote[] {
     return this.quotes.map((q) => ({ ...q }));
@@ -123,6 +174,9 @@ export class MarketSimulator {
         const lot = 100 * (1 + this.rng.int(10));
         q.last = this.rng.next() < 0.5 ? q.bid : q.ask;
         q.vol += lot;
+        if (this.watched.has(q.id)) {
+          this.trades.push({ id: q.id, ts: now, price: q.last, size: lot, side: q.last === q.ask ? "buy" : "sell" });
+        }
       }
       q.ts = now;
       out[i] = {

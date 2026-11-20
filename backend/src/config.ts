@@ -21,4 +21,12 @@ export const config = {
    * instruments produce most of the updates, like a real market.
    */
   activitySkew: num("ACTIVITY_SKEW", 1),
+  /** Most instruments one client may subscribe to (depth and trades) at once. */
+  maxSubscriptions: num("MAX_SUBSCRIPTIONS", 5),
+  /** Rungs on each side of the order book. */
+  depthLevels: num("DEPTH_LEVELS", 10),
+  /** How many price history points are kept per instrument (one per interval: 300 at 1 s is the last 5 minutes). */
+  historyPoints: num("HISTORY_POINTS", 300),
+  /** Time between price history points. */
+  historyIntervalMs: num("HISTORY_INTERVAL_MS", 1000),
 } as const;

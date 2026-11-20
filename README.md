@@ -26,16 +26,19 @@ backend/
   src/
     config.ts                 env-driven settings
     protocol/
-      messages.ts             wire types: Session, Snapshot, Delta, Quote, resync request
+      messages.ts             wire types: Session, Snapshot, Delta, Quote, Depth, Trades, requests
       codec.ts                MessagePack encode/decode
     sim/
       rng.ts                  seeded PRNG for reproducible runs
       marketSimulator.ts      in-memory random-walk market with skewed (Zipf) activity
       instruments.ts          the instrument groups (currency, decimals, tick size) and their names
+      depth.ts                builds the order book (depth ladder) around a quote
+      history.ts              ring buffer of recent last prices per instrument
     server/
       index.ts                WebSocket server, tick loop, fan-out, stats log
       ticker.ts               drift-free timer (keeps an absolute schedule)
       chaos.ts                fault-injection state and the commands that change it
+      subscriptions.ts        which clients watch which instruments, with the per-client limit
   scripts/
     smoke-client.ts           headless client: checks seq gaps and latency
     chaos.ts                  command-line tool that sends a chaos command to a running server
@@ -69,6 +72,10 @@ Set through environment variables:
 | `TICK_MS` | `20` | Simulator tick interval; one delta frame is sent per tick |
 | `MAX_BUFFERED_BYTES` | `4194304` | Per-client socket buffer limit before frames are dropped |
 | `SEED` | `42` | PRNG seed |
+| `MAX_SUBSCRIPTIONS` | `5` | Most instruments one client may subscribe to (depth and trades) at once |
+| `DEPTH_LEVELS` | `10` | Rungs on each side of the order book |
+| `HISTORY_POINTS` | `300` | Price history points kept per instrument |
+| `HISTORY_INTERVAL_MS` | `1000` | Time between price history points (300 points at 1 s is the last 5 minutes) |
 | `ACTIVITY_SKEW` | `1` | How unevenly updates are spread over the symbols: `0` = all equally active, `1` = a few hot symbols produce most of the updates |
 
 Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
@@ -87,12 +94,30 @@ All frames are binary MessagePack. Prices are fixed-point integers in **each ins
 - **`resync`** (client to server): requests a fresh snapshot.
 - **`reference`** (client to server, then server to that client): `{ t: "reference" }` asks for the reference data, and the server replies with `{ t: "reference", instruments: [...] }`. It is opt-in, so a client that never asks sees exactly the stream it would have seen without this feature. See [Instruments and reference data](#instruments-and-reference-data).
 - **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
+- **`subscribe` / `unsubscribe`** (client to server): `{ t: "subscribe", id }` starts two extra streams for one instrument, to that client only: **`depth`** and **`trades`**. Each client can watch up to `MAX_SUBSCRIPTIONS` instruments (5 by default); beyond that, or for an unknown id, the server replies `{ t: "rejected", request: "subscribe", id, reason }` with `reason` `"limit"` or `"unknown-instrument"`. All of a client's subscriptions end when it disconnects. See [Instrument detail](#instrument-detail-depth-trades-and-history).
+- **`history`** (client to server, then server to that client): `{ t: "history", id }` asks once for an instrument's recent price history. The reply is `{ t: "history", id, points: [[ts, price], ...] }`, oldest first, one point per `HISTORY_INTERVAL_MS`.
 
 Clients detect a gap when `seq` skips, and respond by sending `resync`.
 
 ### Backpressure
 
 Each frame is encoded once and sent to every client. If a client's socket buffer exceeds `MAX_BUFFERED_BYTES`, the server skips frames for that client instead of letting memory grow. The client sees the sequence gap and resyncs.
+
+### Instrument detail: depth, trades and history
+
+The grid shows one best bid and ask per instrument (level 1). A detail view needs more about the one instrument you are looking at. It is all opt-in, so a client that never subscribes receives exactly the stream described above.
+
+| Message | What it is | How it arrives |
+| --- | --- | --- |
+| `depth` | The order book (level 2): `bids` and `asks`, each a list of `[price, size]` rungs, best price first (`DEPTH_LEVELS`, 10 by default). `bids[0]` and `asks[0]` are the quote's own bid and ask. | A stream: once right after subscribing, then once per tick in which that instrument updated. It is the **whole** ladder every time, not a change, so a client just replaces what it had and needs no gap recovery |
+| `trades` | `{ id, trades: [{ ts, price, size, side }] }`: the trades since the last frame, oldest first. `side` is `"buy"` at the ask or `"sell"` at the bid. | A stream: only sent when there were trades. About a fifth of updates are a trade, which is what moves `last` and `vol` |
+| `history` | Recent `last` prices, oldest first | One reply to a request, not a stream |
+
+Prices are wire integers in the instrument's own scale, like quotes. The rungs below the top of the book are made up, but only from the instrument, the rung and the quote's time, so a ladder keeps its shape until the instrument next updates and the same quote always gives the same ladder. Depth and history never use the simulator's random generator for live prices, so subscribing does not change the market. The past points of the history are generated at start-up as a random walk that ends at the current price (with its own generator), and from then on one real point is added per interval.
+
+The depth and trades of a tick travel with that tick's delta: the `latency` chaos command holds them back with it, a `gap` loses them with it, and `pause` stops them. A client that is not keeping up simply misses some, which does no harm, since the next ladder replaces the last one.
+
+The smoke client can exercise it: `SUBSCRIBE=0,1 HISTORY=0 npm run smoke` subscribes to instruments 0 and 1, asks for the history of 0, and prints depth and trade counts each second.
 
 ### Instruments and reference data
 
