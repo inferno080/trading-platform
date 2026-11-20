@@ -1,3 +1,4 @@
+import type { ChartUpdate } from "../feed/messages";
 import type { InstrumentReference, Quote } from "../protocol/messages";
 
 /** An instrument with no update for this long is shown as stale. */
@@ -57,6 +58,45 @@ export class FeedStore {
 
   get rows(): Row[] {
     return [...this.rowsById.values()];
+  }
+
+  /** One row, or undefined if there is none (yet) for that instrument. */
+  row(id: number): Row | undefined {
+    return this.rowsById.get(id);
+  }
+
+  /** The reference data of one instrument, once it has arrived. */
+  instrument(id: number): InstrumentReference | undefined {
+    return this.reference?.get(id);
+  }
+
+  /** The price charts of the tracked instruments (the open one and the watchlist's), as last sent by the worker. */
+  private readonly charts = new Map<number, Float64Array>();
+  private readonly chartListeners = new Set<(ids: number[]) => void>();
+
+  /** One instrument's chart: the flat [time, price, ...] list, or undefined until its history has arrived. */
+  chart(id: number): Float64Array | undefined {
+    return this.charts.get(id);
+  }
+
+  setCharts(updates: ChartUpdate[]): void {
+    for (const update of updates) this.charts.set(update.id, update.data);
+    this.notifyCharts(updates.map((update) => update.id));
+  }
+
+  /** Forget the charts of instruments that are no longer tracked, so a later one starts from its skeleton again. */
+  keepCharts(ids: ReadonlySet<number>): void {
+    for (const id of [...this.charts.keys()]) if (!ids.has(id)) this.charts.delete(id);
+  }
+
+  /** Be told, with the instrument ids, when charts change. Returns the way to stop. */
+  subscribeCharts(listener: (ids: number[]) => void): () => void {
+    this.chartListeners.add(listener);
+    return () => this.chartListeners.delete(listener);
+  }
+
+  private notifyCharts(ids: number[]): void {
+    for (const listener of this.chartListeners) listener(ids);
   }
 
   subscribe(listener: (change: RowsChange) => void): () => void {

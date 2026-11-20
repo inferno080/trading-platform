@@ -29,14 +29,14 @@ function signOf(value: number | null | undefined): Direction {
 const cellClasses = (move: number | null | undefined, direction: Direction | undefined): string[] =>
   [moveClass(move), flashClass(direction)].filter((name): name is string => name !== undefined);
 
-/** The same 14 columns as the Naive table, so the two can be compared fairly. */
+/** The same 12 columns as the Naive table, so the two can be compared fairly. */
 export function buildColumns(t: Translate, locale: string, flash: boolean): ColDef<Row>[] {
   const integer = integerFormatter(locale);
   const percent = percentFormatter(locale);
 
   // A price, formatted with its own instrument's decimals; optionally led by an arrow for its last move.
   const price =
-    (field: "bid" | "ask" | "spread" | "last" | "prevClose" | "tickSize", direction?: keyof Row) =>
+    (field: "bid" | "ask" | "spread" | "last" | "prevClose", direction?: keyof Row) =>
     (params: ValueFormatterParams<Row>): string => {
       const row = params.data;
       if (!row) return "";
@@ -58,6 +58,13 @@ export function buildColumns(t: Translate, locale: string, flash: boolean): ColD
     filter: "agNumberColumnFilter",
     valueFormatter: formatter,
     ...extra,
+  });
+
+  // A size has no direction of its own, so it flashes in the color of the price it goes with (its text stays
+  // ordinary): Bid size with Bid, Ask size with Ask. The spread and the volume do not flash: neither has a direction worth a color.
+  const flashingWith = (direction: keyof Row) => ({
+    cellClass: (params: CellClassParams<Row>) => cellClasses(undefined, params.data?.[direction] as Direction | undefined),
+    enableCellChangeFlash: flash,
   });
 
   const moving = (direction: keyof Row) => ({
@@ -91,10 +98,8 @@ export function buildColumns(t: Translate, locale: string, flash: boolean): ColD
         enableCellChangeFlash: flash,
       },
     ),
-    number("bidSz", "table.bidSize", (params) => integer.format(params.value as number), { enableCellChangeFlash: flash }),
-    number("askSz", "table.askSize", (params) => integer.format(params.value as number), { enableCellChangeFlash: flash }),
-    number("vol", "table.volume", (params) => integer.format(params.value as number), { enableCellChangeFlash: flash }),
-    number("tickSize", "table.tickSize", price("tickSize")),
-    number("decimals", "table.decimals", (params) => integer.format(params.value as number)),
+    number("bidSz", "table.bidSize", (params) => integer.format(params.value as number), flashingWith("dirBid")),
+    number("askSz", "table.askSize", (params) => integer.format(params.value as number), flashingWith("dirAsk")),
+    number("vol", "table.volume", (params) => integer.format(params.value as number)),
   ];
 }

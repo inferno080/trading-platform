@@ -5,6 +5,10 @@
  * If a client sees `seq` skip (gap), or the server dropped frames for it due to
  * backpressure, the client sends { t: "resync" } and gets a fresh Snapshot.
  *
+ * A client can also ask for more detail about the instruments it cares about (all of this is opt-in, so a client that
+ * never asks sees exactly the stream above): { t: "subscribe", id } starts a depth ladder and a trades feed for one
+ * instrument, { t: "unsubscribe", id } stops them, and { t: "history", id } asks once for its recent price history.
+ *
  * Prices are fixed-point integers in each instrument's own scale: real price = wire value / 10^decimals, where
  * `decimals` comes from that instrument's reference data (ask for it with { t: "reference" }).
  */
@@ -74,7 +78,53 @@ export interface ReferenceData {
   instruments: InstrumentReference[];
 }
 
-export type ServerMessage = Session | Snapshot | Delta | ReferenceData;
+/** One rung of the order book: a price (wire integer) and the quantity waiting at it. */
+export type DepthLevel = [price: number, size: number];
+
+/**
+ * The order book (level 2) of one instrument the client subscribed to. Best price first on each side. It is the
+ * whole ladder every time, not a change, so a client simply replaces what it had and needs no gap recovery.
+ * Sent when the instrument updates (at most once per tick), and once right after subscribing.
+ */
+export interface Depth {
+  t: "depth";
+  id: number;
+  ts: number; // server time, epoch ms
+  bids: DepthLevel[]; // highest price first; bids[0] is the quote's bid
+  asks: DepthLevel[]; // lowest price first; asks[0] is the quote's ask
+}
+
+/** One completed trade. A "buy" trades at the ask (the buyer crossed the spread), a "sell" at the bid. */
+export interface Trade {
+  ts: number; // server time, epoch ms
+  price: number; // fixed-point integer
+  size: number;
+  side: "buy" | "sell";
+}
+
+/** The trades of one subscribed instrument since the last frame, oldest first. Only sent when there were some. */
+export interface Trades {
+  t: "trades";
+  id: number;
+  trades: Trade[];
+}
+
+/** Recent price history of one instrument, oldest first: [epoch ms, last price as a wire integer], one point per interval. */
+export interface HistoryData {
+  t: "history";
+  id: number;
+  points: [ts: number, price: number][];
+}
+
+/** Why a request was refused. */
+export interface Rejected {
+  t: "rejected";
+  request: "subscribe" | "history";
+  id: number;
+  reason: "limit" | "unknown-instrument"; // limit: the client already has the most subscriptions allowed
+}
+
+export type ServerMessage = Session | Snapshot | Delta | ReferenceData | Depth | Trades | HistoryData | Rejected;
 
 export interface ResyncRequest {
   t: "resync";
@@ -99,4 +149,28 @@ export interface ChaosCommand {
   value?: number;
 }
 
-export type ClientMessage = ResyncRequest | ReferenceRequest | ChaosCommand;
+/** Starts the depth ladder and trades feed for one instrument (up to the per-client limit). */
+export interface SubscribeRequest {
+  t: "subscribe";
+  id: number;
+}
+
+/** Stops the depth ladder and trades feed for one instrument. */
+export interface UnsubscribeRequest {
+  t: "unsubscribe";
+  id: number;
+}
+
+/** Asks once for the recent price history of one instrument. Answered with HistoryData, to this client only. */
+export interface HistoryRequest {
+  t: "history";
+  id: number;
+}
+
+export type ClientMessage =
+  | ResyncRequest
+  | ReferenceRequest
+  | ChaosCommand
+  | SubscribeRequest
+  | UnsubscribeRequest
+  | HistoryRequest;

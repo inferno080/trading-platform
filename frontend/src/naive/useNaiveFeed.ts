@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { appendTick, flatten } from "../chart/series";
 import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
@@ -6,7 +7,9 @@ import {
   PROTOCOL_VERSION,
   type InstrumentReference,
   type Quote,
+  type HistoryData,
   type QuoteUpdate,
+  type Rejected,
   type Session,
 } from "../protocol/messages";
 
@@ -28,6 +31,37 @@ export const applyUpdates = (quotes: Quote[], updates: QuoteUpdate[]): Quote[] =
   return next;
 };
 
+/** The price charts of the tracked instruments (the open one and the watchlist's), by instrument id. */
+export type Charts = Record<number, number[]>;
+
+const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
+
+/** Naive: every update of a tracked instrument copies its whole chart (and the lot of them) and sets state again. */
+function foldTicks(setCharts: (update: (previous: Charts) => Charts) => void, tracked: ReadonlySet<number>, updates: QuoteUpdate[]): void {
+  for (const update of updates) {
+    if (!tracked.has(update.id)) continue;
+    setCharts((previous) => {
+      const current = previous[update.id];
+      if (!current) return previous; // its history has not arrived yet
+      const data = current.slice();
+      appendTick(data, update.ts, update.last);
+      return { ...previous, [update.id]: data };
+    });
+  }
+}
+
+/** The server's answer to a request for a tracked instrument's history: the data, or a refusal. */
+function applyChartReply(
+  msg: HistoryData | Rejected,
+  tracked: ReadonlySet<number>,
+  setCharts: (update: (previous: Charts) => Charts) => void,
+  setUnavailable: (update: (previous: number[]) => number[]) => void,
+): void {
+  if (!tracked.has(msg.id)) return; // an answer for an instrument that is no longer tracked
+  if (msg.t === "history") setCharts((previous) => ({ ...previous, [msg.id]: flatten(msg.points) }));
+  else if (msg.request === "history") setUnavailable((previous) => (previous.includes(msg.id) ? previous : [...previous, msg.id]));
+}
+
 /**
  * DELIBERATELY NAIVE baseline: every WebSocket message goes straight into React state,
  * and the whole table re-renders. No worker, no batching, no memoization.
@@ -36,21 +70,71 @@ export const applyUpdates = (quotes: Quote[], updates: QuoteUpdate[]): Quote[] =
  * Once per connection, right after the session, it asks the server for the reference data (names, currencies,
  * decimals and previous closes). That data is static, so it is kept apart from the quotes that change every frame.
  */
-export function useNaiveFeed() {
+export function useNaiveFeed(selectedId: number | null = null, watchlist: number[] = NO_IDS) {
   const [status, setStatus] = useState<FeedStatus>("connecting");
   const [session, setSession] = useState<Session | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [reference, setReference] = useState<ReferenceById | null>(null);
   const [referenceMissing, setReferenceMissing] = useState(false);
   const [badVersion, setBadVersion] = useState<number | null>(null);
+  // The price charts of the tracked instruments, and the ones the server has no history for.
+  const [charts, setCharts] = useState<Charts>({});
+  const [chartUnavailable, setChartUnavailable] = useState<number[]>([]);
+  const socket = useRef<WebSocket | null>(null);
+  const tracked = useRef<ReadonlySet<number>>(new Set()); // read by the socket's handlers, which are set up once
+  const requested = useRef(new Set<number>()); // histories asked for on this connection
+  const subscribed = useRef(new Set<number>()); // watchlist subscriptions made on this connection
+  const sync = useRef<() => void>(() => undefined);
+
+  // Make what the server knows match what the page wants: history for each tracked instrument, subscriptions for the
+  // watchlist, and nothing kept for instruments that are no longer tracked. Runs when the choice changes, and again
+  // whenever the connection opens.
+  useEffect(() => {
+    sync.current = () => {
+      const wanted = new Set(watchlist);
+      if (selectedId !== null) wanted.add(selectedId);
+      tracked.current = wanted;
+      for (const id of [...requested.current]) if (!wanted.has(id)) requested.current.delete(id);
+      setCharts((previous) => {
+        const kept = Object.keys(previous).filter((id) => wanted.has(Number(id)));
+        return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept.map((id) => [id, previous[Number(id)]!]));
+      });
+      setChartUnavailable((previous) => (previous.every((id) => wanted.has(id)) ? previous : previous.filter((id) => wanted.has(id))));
+
+      const ws = socket.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return; // nothing can be sent until the connection is open
+      for (const id of wanted) {
+        if (requested.current.has(id)) continue;
+        requested.current.add(id);
+        ws.send(encodeClientMessage({ t: "history", id }));
+      }
+      for (const id of [...subscribed.current]) {
+        if (watchlist.includes(id)) continue;
+        subscribed.current.delete(id);
+        ws.send(encodeClientMessage({ t: "unsubscribe", id }));
+      }
+      for (const id of watchlist) {
+        if (subscribed.current.has(id)) continue;
+        subscribed.current.add(id);
+        ws.send(encodeClientMessage({ t: "subscribe", id }));
+      }
+    };
+    sync.current();
+  }, [selectedId, watchlist]);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
     ws.binaryType = "arraybuffer";
+    socket.current = ws;
     let lastSeq = -1; // -1 means "waiting for a snapshot": deltas are ignored until one arrives
     let referenceTimer: number | undefined;
 
-    ws.onopen = () => setStatus("live");
+    ws.onopen = () => {
+      setStatus("live");
+      requested.current.clear(); // a new connection knows nothing of what was asked before
+      subscribed.current.clear();
+      sync.current();
+    };
     ws.onclose = () => setStatus((s) => (s === "error" ? s : "closed"));
     ws.onerror = () => setStatus("error");
 
@@ -95,6 +179,12 @@ export function useNaiveFeed() {
           lastSeq = msg.seq;
           collector.onDelta(msg.updates.length, Date.now() - msg.ts);
           setQuotes((previous) => applyUpdates(previous, msg.updates));
+          foldTicks(setCharts, tracked.current, msg.updates);
+          break;
+
+        case "history":
+        case "rejected":
+          applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
           break;
       }
     };
@@ -106,5 +196,5 @@ export function useNaiveFeed() {
     };
   }, []);
 
-  return { status, session, quotes, reference, referenceMissing, badVersion };
+  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable };
 }

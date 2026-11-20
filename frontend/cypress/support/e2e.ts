@@ -41,3 +41,12 @@ export function waitForLiveGrid(): void {
   cy.get(".status", { timeout: 20000 }).should("have.attr", "data-status", "live");
   cy.get(".ag-row[row-id]", { timeout: 20000 }).should("have.length.greaterThan", 5);
 }
+
+/** Wait until the open chart has data and has really been drawn (the canvas has pixels), whichever tab it is on. */
+export function waitForChartDrawn(): void {
+  cy.get('canvas.chart-canvas[data-ready="true"]', { timeout: 30000 }).should(($canvas) => {
+    const element = $canvas[0] as HTMLCanvasElement;
+    const { data } = element.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, element.width, element.height);
+    expect(data.some((value, i) => i % 4 === 3 && value > 0), "the chart has been drawn").to.equal(true);
+  });
+}

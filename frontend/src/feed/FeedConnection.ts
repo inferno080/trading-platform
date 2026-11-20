@@ -1,6 +1,7 @@
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
-import { PROTOCOL_VERSION, type Quote, type QuoteUpdate } from "../protocol/messages";
-import type { FeedStats, FeedStatus, WorkerEvent } from "./messages";
+import { appendTick } from "../chart/series";
+import { PROTOCOL_VERSION, type HistoryData, type Quote, type QuoteUpdate, type Rejected } from "../protocol/messages";
+import type { ChartUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
 
 /** How long to wait for the reference data after the session before reporting that it is late. */
 export const REFERENCE_TIMEOUT_MS = 10_000;
@@ -36,6 +37,13 @@ export class FeedConnection {
   private changed = new Set<number>(); // instruments updated since the last pull
   private lastSeq = -1; // -1 means "waiting for a snapshot": deltas are ignored until one arrives
   private stats: FeedStats = emptyStats();
+  private selectedId: number | null = null; // the instrument whose price chart the page shows
+  private watched = new Set<number>(); // the instruments on the watchlist
+  private series = new Map<number, number[]>(); // a chart per tracked instrument: the flat [time, price, ...] list, once its history has arrived
+  private changedSeries = new Set<number>(); // charts that changed since the last pull
+  private requested = new Set<number>(); // instruments whose history was asked for on this connection
+  private subscribed = new Set<number>(); // instruments subscribed to on this connection
+  private open = false; // the socket is open, so requests can be sent
 
   constructor(
     private readonly createSocket: (url: string) => SocketLike,
@@ -52,8 +60,15 @@ export class FeedConnection {
     socket.binaryType = "arraybuffer";
     this.setStatus("connecting");
 
-    socket.onopen = () => this.setStatus("live");
-    socket.onclose = () => this.setStatus(this.status === "error" ? "error" : "closed"); // an error stays an error
+    socket.onopen = () => {
+      this.open = true;
+      this.setStatus("live");
+      this.syncTracking(); // whatever was chosen before the connection was up
+    };
+    socket.onclose = () => {
+      this.open = false;
+      this.setStatus(this.status === "error" ? "error" : "closed"); // an error stays an error
+    };
     socket.onerror = () => this.setStatus("error");
     socket.onmessage = (event) => this.handle(socket, event.data);
   }
@@ -68,7 +83,54 @@ export class FeedConnection {
     this.socket = null;
   }
 
-  /** Hand over what changed since the last call: the latest state of each changed instrument, and the counters. */
+  /** The page now shows the price chart of this instrument (or none). */
+  select(id: number | null): void {
+    this.selectedId = id;
+    this.syncTracking();
+  }
+
+  /** The watchlist is now these instruments: new ones are subscribed to, removed ones unsubscribed from. */
+  watch(ids: number[]): void {
+    this.watched = new Set(ids);
+    this.syncTracking();
+  }
+
+  private isTracked(id: number): boolean {
+    return id === this.selectedId || this.watched.has(id);
+  }
+
+  /**
+   * Make what the server knows match what the page wants: ask for the history of each tracked instrument once, forget
+   * the charts of instruments no longer tracked, and subscribe to the watchlist (and unsubscribe from what left it).
+   * Requests are only sent while the socket is open; anything left over is sent when it opens.
+   */
+  private syncTracking(): void {
+    for (const id of [...this.series.keys()]) if (!this.isTracked(id)) this.series.delete(id);
+    for (const id of [...this.requested]) if (!this.isTracked(id)) this.requested.delete(id);
+    if (this.open && this.socket) this.sendTrackingRequests(this.socket);
+  }
+
+  /** The requests that bring the server up to date: histories not yet asked for, and subscriptions added or dropped. */
+  private sendTrackingRequests(socket: SocketLike): void {
+    const wanted = this.selectedId === null ? [...this.watched] : [...this.watched, this.selectedId];
+    for (const id of wanted) {
+      if (this.requested.has(id)) continue;
+      this.requested.add(id);
+      socket.send(encodeClientMessage({ t: "history", id }));
+    }
+    for (const id of [...this.subscribed]) {
+      if (this.watched.has(id)) continue;
+      this.subscribed.delete(id);
+      socket.send(encodeClientMessage({ t: "unsubscribe", id }));
+    }
+    for (const id of this.watched) {
+      if (this.subscribed.has(id)) continue;
+      this.subscribed.add(id);
+      socket.send(encodeClientMessage({ t: "subscribe", id }));
+    }
+  }
+
+  /** Hand over what changed since the last call: the latest state of each changed instrument, the counters, and the chart if it changed. */
   pull(): void {
     const updates: Quote[] = [];
     for (const id of this.changed) {
@@ -78,7 +140,17 @@ export class FeedConnection {
     this.changed.clear();
     const stats = this.stats;
     this.stats = emptyStats();
-    this.emit({ type: "batch", updates, stats });
+    if (this.changedSeries.size === 0) {
+      this.emit({ type: "batch", updates, stats });
+      return;
+    }
+    const charts: ChartUpdate[] = [];
+    for (const id of this.changedSeries) {
+      const data = this.series.get(id);
+      if (data) charts.push({ id, data: Float64Array.from(data) });
+    }
+    this.changedSeries.clear();
+    this.emit({ type: "batch", updates, stats, charts });
   }
 
   private resetState(): void {
@@ -86,6 +158,11 @@ export class FeedConnection {
     this.changed.clear();
     this.lastSeq = -1;
     this.stats = emptyStats();
+    this.series.clear(); // asked for again once the new connection is open
+    this.changedSeries.clear();
+    this.requested.clear();
+    this.subscribed.clear();
+    this.open = false;
   }
 
   private setStatus(status: FeedStatus): void {
@@ -113,6 +190,13 @@ export class FeedConnection {
         clearTimeout(this.referenceTimer);
         this.emit({ type: "reference", instruments: message.instruments });
         break;
+      case "history":
+      case "rejected":
+        this.handleChartReply(message);
+        break;
+      case "depth":
+      case "trades":
+        break; // sent for the watchlist's subscriptions, but nothing shows them yet
       case "snapshot":
         this.lastSeq = message.seq;
         this.quotes = message.quotes;
@@ -143,6 +227,29 @@ export class FeedConnection {
       if (!current) continue;
       Object.assign(current, update);
       this.changed.add(update.id);
+    }
+    this.foldIntoCharts(updates);
+  }
+
+  /** The server's answer to a request for a tracked instrument's history: the data, or that there is none. */
+  private handleChartReply(message: HistoryData | Rejected): void {
+    if (!this.isTracked(message.id)) return; // an answer for an instrument that is no longer tracked
+    if (message.t === "history") {
+      this.series.set(message.id, message.points.flat());
+      this.changedSeries.add(message.id);
+    } else if (message.request === "history") {
+      this.emit({ type: "chartUnavailable", id: message.id });
+    }
+  }
+
+  /** Keep every tracked chart current: each update of its instrument is folded into the newest point or starts a new one. */
+  private foldIntoCharts(updates: QuoteUpdate[]): void {
+    if (this.series.size === 0) return; // no history yet: it will include these
+    for (const update of updates) {
+      const data = this.series.get(update.id);
+      if (!data || data.length === 0) continue;
+      appendTick(data, update.ts, update.last);
+      this.changedSeries.add(update.id);
     }
   }
 }

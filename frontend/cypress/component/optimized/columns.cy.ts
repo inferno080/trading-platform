@@ -19,7 +19,7 @@ const cellClass = (col: ColDef<Row>, row: Row): string[] =>
   (col.cellClass as (params: { data: Row }) => string[])({ data: row });
 
 describe("buildColumns", () => {
-  it("has the same 14 columns as the Naive table, in the same order", () => {
+  it("has the same 12 columns as the Naive table, in the same order", () => {
     expect(columns().map((c) => c.headerName)).to.deep.equal([
       "table.symbol",
       "table.name",
@@ -33,8 +33,6 @@ describe("buildColumns", () => {
       "table.bidSize",
       "table.askSize",
       "table.volume",
-      "table.tickSize",
-      "table.decimals",
     ]);
   });
 
@@ -69,11 +67,10 @@ describe("buildColumns", () => {
       expect(format(column("last"), row).startsWith("▲")).to.equal(false);
     });
 
-    it("show no arrow for the spread, the previous close or the tick size", () => {
+    it("show no arrow for the spread or the previous close", () => {
       const row = makeRow({ dirBid: 1, dirAsk: 1, dirLast: 1 });
       expect(format(column("spread"), row)).to.equal("0.04");
       expect(format(column("prevClose"), row)).to.equal("298.00");
-      expect(format(column("tickSize"), row)).to.equal("0.01");
     });
 
     it("format nothing when there is no row", () => {
@@ -124,21 +121,42 @@ describe("buildColumns", () => {
     });
   });
 
-  it("formats sizes and volume as whole numbers in the locale, and the decimals column as a number", () => {
+  it("does not show the tick size or the decimals as columns, since they are facts about the instrument, shown in its detail panel", () => {
+    expect(columns().some((c) => c.field === "tickSize" || c.field === "decimals")).to.equal(false);
+  });
+
+  it("formats sizes and volume as whole numbers in the locale", () => {
     const row = makeRow({ bidSz: 1234567, decimals: 3 });
     expect(format(column("bidSz"), row)).to.equal("1,234,567");
     expect(format(column("bidSz", columns("de-DE")), row)).to.equal("1.234.567");
     expect(format(column("askSz"), row)).to.equal("3,500");
     expect(format(column("vol"), row)).to.equal("8,600");
-    expect(format(column("decimals"), row)).to.equal("3");
   });
 
   it("flashes changed values, unless the user asked for less motion", () => {
-    const flashing = ["bid", "ask", "last", "change", "bidSz", "askSz", "vol"];
+    const flashing = ["bid", "ask", "last", "change", "bidSz", "askSz"];
     for (const field of flashing) {
       expect(column(field).enableCellChangeFlash, `${field} flashes`).to.equal(true);
       expect(column(field, columns("en-US", false)).enableCellChangeFlash, `${field} is calm`).to.equal(false);
     }
-    expect(column("spread").enableCellChangeFlash).to.equal(undefined);
+  });
+
+  it("does not flash the spread, the volume, the previous close or the text columns", () => {
+    for (const field of ["spread", "vol", "prevClose", "sym", "name", "currency"]) {
+      expect(column(field).enableCellChangeFlash, `${field} does not flash`).to.equal(undefined);
+    }
+  });
+
+  describe("the sizes", () => {
+    it("flash in the color of the price they go with, and keep ordinary text: Bid size with Bid, Ask size with Ask", () => {
+      const row = makeRow({ dirBid: 1, dirAsk: -1 });
+      expect(cellClass(column("bidSz"), row)).to.deep.equal(["flash-up"]);
+      expect(cellClass(column("askSz"), row)).to.deep.equal(["flash-down"]);
+    });
+
+    it("have no color class before their price has moved, so they flash the neutral grey", () => {
+      expect(cellClass(column("bidSz"), makeRow({ dirBid: 0 }))).to.deep.equal([]);
+      expect(cellClass(column("askSz"), makeRow({ dirAsk: 0 }))).to.deep.equal([]);
+    });
   });
 });

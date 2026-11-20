@@ -22,13 +22,14 @@ describe("recording a benchmark run", () => {
         return cy.readFile(`${Cypress.config("downloadsFolder")}/${fileName}`, { timeout: 15000 });
       })
       .then((result) => {
-        expect(result.schema).to.equal(1);
+        expect(result.schema).to.equal(2);
         expect(result.mode).to.equal("naive");
         expect(result.build).to.equal("production");
         expect(result.warmupSeconds).to.equal(3);
         expect(result.durationSeconds).to.equal(30);
         expect(result.samples).to.have.length(30);
         expect(result.tabHidden).to.equal(false);
+        expect(result.settings).to.deep.equal({ refreshSeconds: null, changedDuringRun: false }); // Naive has no refresh interval
         expect(result.load.instruments).to.be.greaterThan(0);
         expect(result.summary.fpsAvg).to.be.a("number");
         expect(result.summary.latencyMs.p99).to.be.at.least(result.summary.latencyMs.p50);

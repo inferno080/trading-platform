@@ -26,16 +26,19 @@ backend/
   src/
     config.ts                 env-driven settings
     protocol/
-      messages.ts             wire types: Session, Snapshot, Delta, Quote, resync request
+      messages.ts             wire types: Session, Snapshot, Delta, Quote, Depth, Trades, requests
       codec.ts                MessagePack encode/decode
     sim/
       rng.ts                  seeded PRNG for reproducible runs
       marketSimulator.ts      in-memory random-walk market with skewed (Zipf) activity
       instruments.ts          the instrument groups (currency, decimals, tick size) and their names
+      depth.ts                builds the order book (depth ladder) around a quote
+      history.ts              ring buffer of recent last prices per instrument
     server/
       index.ts                WebSocket server, tick loop, fan-out, stats log
       ticker.ts               drift-free timer (keeps an absolute schedule)
       chaos.ts                fault-injection state and the commands that change it
+      subscriptions.ts        which clients watch which instruments, with the per-client limit
   scripts/
     smoke-client.ts           headless client: checks seq gaps and latency
     chaos.ts                  command-line tool that sends a chaos command to a running server
@@ -69,6 +72,10 @@ Set through environment variables:
 | `TICK_MS` | `20` | Simulator tick interval; one delta frame is sent per tick |
 | `MAX_BUFFERED_BYTES` | `4194304` | Per-client socket buffer limit before frames are dropped |
 | `SEED` | `42` | PRNG seed |
+| `MAX_SUBSCRIPTIONS` | `5` | Most instruments one client may subscribe to (depth and trades) at once |
+| `DEPTH_LEVELS` | `10` | Rungs on each side of the order book |
+| `HISTORY_POINTS` | `300` | Price history points kept per instrument |
+| `HISTORY_INTERVAL_MS` | `1000` | Time between price history points (300 points at 1 s is the last 5 minutes) |
 | `ACTIVITY_SKEW` | `1` | How unevenly updates are spread over the symbols: `0` = all equally active, `1` = a few hot symbols produce most of the updates |
 
 Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
@@ -87,12 +94,30 @@ All frames are binary MessagePack. Prices are fixed-point integers in **each ins
 - **`resync`** (client to server): requests a fresh snapshot.
 - **`reference`** (client to server, then server to that client): `{ t: "reference" }` asks for the reference data, and the server replies with `{ t: "reference", instruments: [...] }`. It is opt-in, so a client that never asks sees exactly the stream it would have seen without this feature. See [Instruments and reference data](#instruments-and-reference-data).
 - **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
+- **`subscribe` / `unsubscribe`** (client to server): `{ t: "subscribe", id }` starts two extra streams for one instrument, to that client only: **`depth`** and **`trades`**. Each client can watch up to `MAX_SUBSCRIPTIONS` instruments (5 by default); beyond that, or for an unknown id, the server replies `{ t: "rejected", request: "subscribe", id, reason }` with `reason` `"limit"` or `"unknown-instrument"`. All of a client's subscriptions end when it disconnects. See [Instrument detail](#instrument-detail-depth-trades-and-history).
+- **`history`** (client to server, then server to that client): `{ t: "history", id }` asks once for an instrument's recent price history. The reply is `{ t: "history", id, points: [[ts, price], ...] }`, oldest first, one point per `HISTORY_INTERVAL_MS`.
 
 Clients detect a gap when `seq` skips, and respond by sending `resync`.
 
 ### Backpressure
 
 Each frame is encoded once and sent to every client. If a client's socket buffer exceeds `MAX_BUFFERED_BYTES`, the server skips frames for that client instead of letting memory grow. The client sees the sequence gap and resyncs.
+
+### Instrument detail: depth, trades and history
+
+The grid shows one best bid and ask per instrument (level 1). A detail view needs more about the one instrument you are looking at. It is all opt-in, so a client that never subscribes receives exactly the stream described above.
+
+| Message | What it is | How it arrives |
+| --- | --- | --- |
+| `depth` | The order book (level 2): `bids` and `asks`, each a list of `[price, size]` rungs, best price first (`DEPTH_LEVELS`, 10 by default). `bids[0]` and `asks[0]` are the quote's own bid and ask. | A stream: once right after subscribing, then once per tick in which that instrument updated. It is the **whole** ladder every time, not a change, so a client just replaces what it had and needs no gap recovery |
+| `trades` | `{ id, trades: [{ ts, price, size, side }] }`: the trades since the last frame, oldest first. `side` is `"buy"` at the ask or `"sell"` at the bid. | A stream: only sent when there were trades. About a fifth of updates are a trade, which is what moves `last` and `vol` |
+| `history` | Recent `last` prices, oldest first | One reply to a request, not a stream |
+
+Prices are wire integers in the instrument's own scale, like quotes. The rungs below the top of the book are made up, but only from the instrument, the rung and the quote's time, so a ladder keeps its shape until the instrument next updates and the same quote always gives the same ladder. Depth and history never use the simulator's random generator for live prices, so subscribing does not change the market. The past points of the history are generated at start-up as a random walk that ends at the current price (with its own generator), and from then on one real point is added per interval. The walk is as lively as that instrument's live prices: each update moves a price by about 2 ticks, so over a second it wanders about 2 × √(updates per second) ticks. With the defaults, the busiest symbol (`AAA`) ranges over roughly 13% in the 5 minutes, a mid-table one a few percent, and a quiet one under 1%.
+
+The depth and trades of a tick travel with that tick's delta: the `latency` chaos command holds them back with it, a `gap` loses them with it, and `pause` stops them. A client that is not keeping up simply misses some, which does no harm, since the next ladder replaces the last one.
+
+The smoke client can exercise it: `SUBSCRIBE=0,1 HISTORY=0 npm run smoke` subscribes to instruments 0 and 1, asks for the history of 0, and prints depth and trade counts each second.
 
 ### Instruments and reference data
 
@@ -105,7 +130,7 @@ The simulator has four groups of instruments, so the feed has to deal with diffe
 | JPY equities | 20% | JPY | 0 | 1 | 500 to 50,000 |
 | FX-style | 10% | USD | 4 | 0.0001 | 0.5 to 2 |
 
-Every price sits on a multiple of its tick, and the spread between bid and ask never changes. A client asks for the static facts about every instrument with a `reference` message and gets one entry each:
+Every price sits on a multiple of its tick. The spread between bid and ask starts at 2 to 8 ticks and then moves: about 15% of updates widen or narrow it by one tick (by moving the bid or the ask), staying between 2 and 12 ticks. A client asks for the static facts about every instrument with a `reference` message and gets one entry each:
 
 | Field | Meaning |
 | --- | --- |
@@ -168,6 +193,8 @@ frontend/src/
   iterations.ts  registry of frontend iterations, one entry per tab
   shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
   feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
+  chart/         the price chart shared by both tabs: data helpers, canvas drawing, the detail panel
+  watchlist/     the watchlist panel, its saved state, the toast and the 70/30 layout
   optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
   naive/         the baseline: WebSocket straight into React state, plain table of all rows
   hud/           performance HUD, metrics collector, and the run recorder
@@ -187,16 +214,29 @@ The **Optimized** iteration moves the work off the page, in four stages:
 
 What you see and can change:
 
-- **Refresh every (seconds)**, a number box that starts at **1.5**. The grid collects the changes and redraws them all together once per interval, showing the latest state of each row; **0** redraws every change as it arrives. The data still arrives and is counted at full speed. One shared redraw means everything that changed flashes in the same instant, which is more noticeable at long intervals; a short interval hides it.
+- **Refresh every (seconds)**, a number box that starts at **1.5** and sets how often **everything on screen** refreshes: the quotes and the price chart. They collect the changes (keeping the latest state of each row, and of the chart) and redraw together once per interval; **0** redraws every change as it arrives. Hovering the chart still moves its crosshair at once. The data still arrives and is counted at full speed. One shared redraw means everything that changed flashes in the same instant, which is more noticeable at long intervals; a short interval hides it.
 - **Flashing** is per cell and coloured by direction: green when a value moved up, red when it moved down, with ▲/▼ marks as well so it never relies on colour alone. Chg % flashes by its own sign. The flash is off when the OS asks for reduced motion.
 - **Sort and filter** on every column. Each heading has a filter button beside its name. With the keyboard, Tab to a heading, then **Enter** sorts and **Ctrl+Enter** opens its filter (Alt+Down also works).
-- **Freeze stream** holds the numbers still while the worker keeps receiving; resuming catches up in one step.
+- **Freeze stream** holds the numbers and the chart still while the worker keeps receiving; resuming catches up in one step.
 - Rows with no update for 5 seconds are marked in the data but drawn as normal text, and nothing is marked while the tab is hidden.
 - The performance panel above the grid shows the live rates; there is no separate panel of connection facts.
 
+**Price chart.** Click a row (or use the symbol button in the Naive table, or Enter on a grid cell) to open a price chart for that symbol above the quotes; Escape or **Close chart** closes it. It shows the last five minutes: the server's price history (see [Instrument detail](#instrument-detail-depth-trades-and-history)) with live prices folded into the newest second. Both tabs draw it on an HTML `<canvas>` with the same drawing code (`frontend/src/chart/`), so they look identical; they differ in what drives it:
+
+| | Naive | Optimized |
+| --- | --- | --- |
+| Data | React state, copied and set again on every update of the symbol | Kept by the worker, which sends the whole chart only when it changed |
+| Drawing | An effect that redraws on every state change, on the page's thread | At most one drawing pass per animation frame, read from the store, with no React render |
+
+The chart has price and time axes (prices in the instrument's own decimals), a crosshair with a time and price label on hover, a shimmering skeleton while the history loads, and a sentence for assistive technology (last, high and low over the period). It follows the theme and the language.
+
+**Watchlist.** On the right (30% of the width; the quotes take the other 70%) is a collapsible watchlist, shown or hidden with the **Watchlist** button in the toolbar. When it is collapsed the quotes use the full width. From an open chart, **Add to watchlist** puts the symbol on it (and the button becomes **Remove from watchlist**); a fifth symbol is refused with a toast ("The watchlist is full (4 symbols)…"). Each entry has a mini chart with its latest price and how far it moved over the period (an arrow as well as a color), a button that opens its full chart, and a remove button. The list is saved in the browser, so it survives a reload and is shared by both tabs. Everything is reachable by keyboard: the toggle, the add and remove buttons, each entry's buttons, and the toast's Dismiss button; after removing an entry, focus moves to the watchlist heading. The toast does not take focus, is announced politely by screen readers, and stays while the pointer or focus is on it.
+
+Each symbol on the watchlist is a **subscription** on the server (the limit of 4 leaves one of the server's 5 per client for later), and removing it unsubscribes. Both tabs keep a chart for every symbol on the watchlist and the open one, built the same way as the big chart: the Naive tab in React state, copied and set on every update; the Optimized tab in the worker, drawn from the store at the refresh interval (and held still by Freeze).
+
 The first iteration built, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
 
-The Naive table shows fourteen columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, volume, tick size and decimals. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The Optimized tab shows the same fourteen columns, so every version does the same visible work and the benchmark compares like with like.
+The Naive table shows twelve columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, and volume. An instrument's tick size and decimals are static facts, so they are shown in the detail panel next to its chart and not as columns. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The Optimized tab shows the same twelve columns, so every version does the same visible work and the benchmark compares like with like.
 
 ### Run it
 
@@ -264,7 +304,7 @@ cd frontend && npm run build && npm run preview -- --port 4173    # terminal 2
 cd frontend && npm run test:e2e                                   # terminal 3
 ```
 
-They cover the live table, loading and error states, navigation and keyboard use, the theme and language settings (including that they persist), a full real-time benchmark recording, and an automated WCAG 2.2 AA scan with [axe](https://github.com/dequelabs/axe-core) in both themes and both languages. The end-to-end run takes about a minute because the recording test runs in real time.
+They cover the live table and grid, the price chart and the watchlist on both tabs (against the real backend, including that adding a symbol subscribes to it and removing it unsubscribes), loading and error states, navigation and keyboard use, the theme and language settings (including that they persist), a full real-time benchmark recording, and an automated WCAG 2.2 AA scan with [axe](https://github.com/dequelabs/axe-core) in both themes and both languages. The end-to-end run takes about a minute because the recording test runs in real time.
 
 An automated scan finds only part of the accessibility problems. A manual pass with a screen reader is still needed.
 
@@ -288,9 +328,14 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 
 - [x] Frontend: naive React client, to capture a baseline
 - [x] Web Worker for the socket and decoding, with per-symbol conflation
-- [x] Virtualized grid (AG Grid), with cell flash on change, stale-data indicators, sort, filter and freeze
+- [x] Virtualized grid (AG Grid), with cell flash on change, sort, filter and freeze
 - [x] Gap detection and resync in the worker
-- [ ] Reconnect with a connection state machine
-- [ ] Performance HUD: FPS, messages/sec, latency percentiles, long tasks, heap
-- [ ] Backend: L2 depth, trades stream, per-symbol subscribe, chaos controls
+- [x] Backend: per-symbol subscribe, L2 depth, trades stream and price history
+- [x] Price chart for the open symbol, on both tabs
+- [x] Collapsible watchlist with mini charts and subscribe/unsubscribe, on both tabs
+- [ ] Depth ladder and trades tape for the open symbol
+- [ ] RFQ ticket with a state machine
+- [ ] Reconnect with a connection state machine, and chaos controls in the UI
+- [ ] Performance HUD: long tasks
+- [ ] More languages (de-DE, Arabic right-to-left)
 - [x] Drift-corrected simulator timing

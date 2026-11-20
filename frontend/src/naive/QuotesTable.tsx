@@ -9,9 +9,12 @@ interface QuotesTableProps {
   quotes: Quote[];
   /** Static facts about each instrument; null until the server has replied to the request for them. */
   reference: ReferenceById | null;
+  /** The instrument whose chart is open, if any, and how to open one. */
+  selectedId?: number | null;
+  onSelect?: (id: number) => void;
 }
 
-const COLUMN_COUNT = 14; // symbol, name, currency, bid, ask, spread, last, prev close, chg %, bid size, ask size, volume, tick, decimals
+const COLUMN_COUNT = 12; // symbol, name, currency, bid, ask, spread, last, prev close, chg %, bid size, ask size, volume
 
 interface QuoteRowProps {
   quote: Quote;
@@ -20,10 +23,12 @@ interface QuoteRowProps {
   integer: Intl.NumberFormat;
   percent: Intl.NumberFormat;
   noReference: string;
+  selected: boolean;
+  onSelect: (id: number) => void;
 }
 
 // One table row. Deliberately not memoized: it re-renders on every feed message.
-function QuoteRow({ quote, instrument, locale, integer, percent, noReference }: QuoteRowProps) {
+function QuoteRow({ quote, instrument, locale, integer, percent, noReference, selected, onSelect }: QuoteRowProps) {
   if (!instrument) {
     // Without the instrument's decimals the prices cannot be read, so show that instead of wrong numbers.
     return (
@@ -36,8 +41,13 @@ function QuoteRow({ quote, instrument, locale, integer, percent, noReference }: 
   const scale = 10 ** instrument.decimals; // wire units per real price unit, specific to this instrument
   const price = priceFormatter(locale, instrument.decimals);
   return (
-    <tr>
-      <th scope="row">{quote.sym}</th>
+    // Clicking anywhere on the row opens the chart; the symbol is also a real button, which is the keyboard way in.
+    <tr className={selected ? "row-selected" : undefined} onClick={() => onSelect(quote.id)}>
+      <th scope="row">
+        <button type="button" className="symbol-button" aria-pressed={selected} onClick={(event) => { event.stopPropagation(); onSelect(quote.id); }}>
+          {quote.sym}
+        </button>
+      </th>
       <td className="text-col">{instrument.name}</td>
       <td className="text-col">{instrument.currency}</td>
       <td>{price.format(quote.bid / scale)}</td>
@@ -49,14 +59,14 @@ function QuoteRow({ quote, instrument, locale, integer, percent, noReference }: 
       <td>{integer.format(quote.bidSz)}</td>
       <td>{integer.format(quote.askSz)}</td>
       <td>{integer.format(quote.vol)}</td>
-      <td>{price.format(instrument.tickSize)}</td>
-      <td>{integer.format(instrument.decimals)}</td>
     </tr>
   );
 }
 
 /** Plain HTML table of every instrument: the naive rendering baseline (5,000 rows, no virtualization). */
-export function QuotesTable({ quotes, reference }: QuotesTableProps) {
+const IGNORE = () => undefined;
+
+export function QuotesTable({ quotes, reference, selectedId = null, onSelect = IGNORE }: QuotesTableProps) {
   const { locale } = useIntl();
   const t = useT();
 
@@ -93,8 +103,6 @@ export function QuotesTable({ quotes, reference }: QuotesTableProps) {
             <th scope="col">{t("table.bidSize")}</th>
             <th scope="col">{t("table.askSize")}</th>
             <th scope="col">{t("table.volume")}</th>
-            <th scope="col">{t("table.tickSize")}</th>
-            <th scope="col">{t("table.decimals")}</th>
           </tr>
         </thead>
         <tbody>
@@ -107,6 +115,8 @@ export function QuotesTable({ quotes, reference }: QuotesTableProps) {
               integer={integer}
               percent={percent}
               noReference={noReference}
+              selected={q.id === selectedId}
+              onSelect={onSelect}
             />
           ))}
         </tbody>

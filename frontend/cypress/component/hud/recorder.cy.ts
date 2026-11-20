@@ -21,11 +21,19 @@ const sample = (overrides: Partial<HudSample> = {}): HudSample => ({
   ...overrides,
 });
 
-const recording = (samples: HudSample[], latencies: number[] = [], tabHidden = false): Recording => ({
+const recording = (
+  samples: HudSample[],
+  latencies: number[] = [],
+  tabHidden = false,
+  refreshSeconds: number | null = null,
+  refreshChanged = false,
+): Recording => ({
   tick: 33,
   samples,
   latencies,
   tabHidden,
+  refreshSeconds,
+  refreshChanged,
 });
 
 describe("buildResult", () => {
@@ -55,9 +63,30 @@ describe("buildResult", () => {
 
   it("records the pipeline mode and the load the server reported", () => {
     const result = buildResult(twoSeconds, "optimized", makeSession());
-    expect(result.schema).to.equal(1);
+    expect(result.schema).to.equal(2);
     expect(result.mode).to.equal("optimized");
     expect(result.load).to.deep.equal({ instruments: 3, updatesPerSecond: 50_000, tickMs: 20, protocolVersion: 2 });
+  });
+
+  describe("the refresh setting", () => {
+    it("saves the interval the grid was redrawing at, so a flattering run cannot pass for a fair one", () => {
+      expect(buildResult(recording([sample()], [], false, 1.5), "optimized", null).settings).to.deep.equal({
+        refreshSeconds: 1.5,
+        changedDuringRun: false,
+      });
+    });
+
+    it("saves 0 as 0, which is the fair way to measure", () => {
+      expect(buildResult(recording([sample()], [], false, 0), "optimized", null).settings.refreshSeconds).to.equal(0);
+    });
+
+    it("saves null for a tab with no such setting, like Naive", () => {
+      expect(buildResult(twoSeconds, "naive", null).settings.refreshSeconds).to.equal(null);
+    });
+
+    it("says when the interval was changed during the run", () => {
+      expect(buildResult(recording([sample()], [], false, 1.5, true), "optimized", null).settings.changedDuringRun).to.equal(true);
+    });
   });
 
   it("records the load as null when there was no session", () => {
@@ -138,11 +167,18 @@ describe("recordingStateAfter", () => {
 });
 
 describe("advanceRecording", () => {
-  const fresh = (): Recording => ({ tick: 0, samples: [], latencies: [], tabHidden: false });
+  const fresh = (refreshSeconds: number | null = null): Recording => ({
+    tick: 0,
+    samples: [],
+    latencies: [],
+    tabHidden: false,
+    refreshSeconds,
+    refreshChanged: false,
+  });
 
   it("counts every second but keeps nothing during warm-up", () => {
     const run = fresh();
-    for (let i = 0; i < 3; i++) advanceRecording(run, sample(), [5], false);
+    for (let i = 0; i < 3; i++) advanceRecording(run, sample(), [5], false, null);
     expect(run.tick).to.equal(3);
     expect(run.samples).to.have.length(0);
     expect(run.latencies).to.have.length(0);
@@ -150,17 +186,32 @@ describe("advanceRecording", () => {
 
   it("keeps each sample and its latencies once warm-up is over", () => {
     const run = fresh();
-    for (let i = 0; i < 4; i++) advanceRecording(run, sample({ fps: 50 + i }), [i, i + 10], false);
+    for (let i = 0; i < 4; i++) advanceRecording(run, sample({ fps: 50 + i }), [i, i + 10], false, null);
     expect(run.samples.map((s) => s.fps)).to.deep.equal([53]);
     expect(run.latencies).to.deep.equal([3, 13]);
   });
 
   it("remembers if the tab was hidden at any point, and never forgets it", () => {
     const run = fresh();
-    advanceRecording(run, sample(), [], false);
+    advanceRecording(run, sample(), [], false, null);
     expect(run.tabHidden).to.equal(false);
-    advanceRecording(run, sample(), [], true);
-    advanceRecording(run, sample(), [], false);
+    advanceRecording(run, sample(), [], true, null);
+    advanceRecording(run, sample(), [], false, null);
     expect(run.tabHidden).to.equal(true);
+  });
+
+  it("notices if the refresh interval changes during the run, and never forgets it", () => {
+    const run = fresh(1.5);
+    advanceRecording(run, sample(), [], false, 1.5);
+    expect(run.refreshChanged).to.equal(false);
+    advanceRecording(run, sample(), [], false, 0);
+    advanceRecording(run, sample(), [], false, 1.5); // changed back, but the run was still affected
+    expect(run.refreshChanged).to.equal(true);
+  });
+
+  it("does not flag a tab with no refresh setting", () => {
+    const run = fresh(null);
+    advanceRecording(run, sample(), [], false, null);
+    expect(run.refreshChanged).to.equal(false);
   });
 });

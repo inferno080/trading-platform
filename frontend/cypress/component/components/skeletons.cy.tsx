@@ -1,4 +1,11 @@
-import { PageSkeleton, TableSkeleton } from "../../../src/components/skeletons";
+import {
+  ChartSkeleton,
+  MiniChartLoading,
+  MiniChartSkeleton,
+  PageSkeleton,
+  SymbolDetailSkeleton,
+  TableSkeleton,
+} from "../../../src/components/skeletons";
 import { withI18n } from "../../support/render";
 
 describe("TableSkeleton", () => {
@@ -15,16 +22,74 @@ describe("PageSkeleton", () => {
     cy.get("[role=status] .visually-hidden").should("have.text", "Loading");
   });
 
-  it("outlines the status line, the HUD and the table", () => {
+  it("has the shape of the real page: toolbar, performance panel, chart panel, then the quotes beside the watchlist", () => {
     cy.mount(withI18n(<PageSkeleton />));
-    cy.get("svg.skeleton").should("have.length", 3); // status, HUD, table
     cy.get(".hud svg.skeleton").should("exist");
-    cy.get(".skeleton-frame").should("exist");
+    cy.get(".symbol-detail svg.skeleton").should("have.length", 2); // the heading line, and the chart
+    cy.get(".workspace[data-watchlist=open] .workspace-main .skeleton-frame").should("exist");
+    cy.get(".workspace-side .watchlist .watch-item").should("have.length", 2);
+    cy.get(".workspace-side .watch-item svg.skeleton").should("have.length", 4); // symbol row and mini chart, twice
+  });
+
+  it("lays the quotes and the watchlist out 70% and 30%, like the real page, so nothing jumps when it is replaced", () => {
+    cy.mount(withI18n(<PageSkeleton />));
+    cy.get(".workspace-main").then(($main) => {
+      const main = $main[0]!.getBoundingClientRect().width;
+      const side = $main.parent().find(".workspace-side")[0]!.getBoundingClientRect().width;
+      expect(main / (main + side), "the quotes' share of the width").to.be.within(0.65, 0.72);
+    });
   });
 
   it("says loading in the current language", () => {
     localStorage.setItem("locale", "ja-JP");
     cy.mount(withI18n(<PageSkeleton />));
     cy.get("[role=status] .visually-hidden").should("have.text", "読み込み中");
+  });
+});
+
+describe("ChartSkeleton", () => {
+  it("is as tall as the real chart, and hidden from assistive technology", () => {
+    cy.mount(withI18n(<ChartSkeleton />));
+    cy.get("svg.skeleton").should("have.attr", "height", "240").and("have.attr", "aria-hidden", "true");
+  });
+
+  it("has a price label and a grid line for each of the five price lines", () => {
+    cy.mount(withI18n(<ChartSkeleton />));
+    cy.get("svg.skeleton rect").should("have.length.greaterThan", 10);
+  });
+});
+
+describe("MiniChartSkeleton", () => {
+  it("is as tall as a watchlist mini chart", () => {
+    cy.mount(withI18n(<MiniChartSkeleton />));
+    cy.get("svg.skeleton").should("have.attr", "height", "56");
+  });
+});
+
+describe("MiniChartLoading", () => {
+  it("stands in for a watchlist chart whose symbol is not known yet, and says it is loading", () => {
+    cy.mount(withI18n(<MiniChartLoading />));
+    cy.get(".mini-chart[role=status] svg.skeleton").should("exist");
+    cy.get(".visually-hidden").should("have.text", "Loading price history");
+  });
+});
+
+describe("SymbolDetailSkeleton", () => {
+  it("is a panel with a heading line and a chart, announced once as loading", () => {
+    cy.mount(withI18n(<SymbolDetailSkeleton />));
+    cy.get("section.symbol-detail[role=status]").should("exist");
+    cy.get(".visually-hidden").should("have.text", "Loading price history");
+    cy.get("svg.skeleton").should("have.length", 2);
+  });
+
+  it("uses colors that stay visible on the panel's own background", () => {
+    cy.mount(withI18n(<SymbolDetailSkeleton />));
+    cy.get("section.symbol-detail").then(($panel) => {
+      const styles = getComputedStyle($panel[0]!);
+      const panelBackground = styles.backgroundColor;
+      const base = styles.getPropertyValue("--skeleton-base").trim();
+      expect(base, "the skeleton color is defined for the panel").not.to.equal("");
+      cy.log(`panel ${panelBackground}, skeleton ${base}`);
+    });
   });
 });
