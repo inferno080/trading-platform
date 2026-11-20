@@ -9,11 +9,18 @@ export interface Iteration {
 }
 
 /**
- * All iterations, in tab order. To add one, build its page and add an entry here.
+ * All iterations, in tab order; the first is the default. To add one, build its page and add an entry here.
+ * Only the active iteration is mounted, so a tab that is not shown holds no socket, timer or table.
  * Pages are loaded with dynamic imports, so each iteration's code (and heavy libraries such as a
  * grid) is only downloaded when its tab is opened, and never inflates another iteration's bundle.
  */
 export const ITERATIONS: Iteration[] = [
+  {
+    id: "optimized",
+    labelId: "tab.optimized",
+    descriptionId: "tab.optimized.description",
+    Page: lazy(() => import("./optimized/OptimizedPage").then((m) => ({ default: m.OptimizedPage }))),
+  },
   {
     id: "naive",
     labelId: "tab.naive",

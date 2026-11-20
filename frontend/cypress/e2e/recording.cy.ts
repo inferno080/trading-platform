@@ -1,9 +1,9 @@
-import { waitForLiveTable } from "../support/e2e";
+import { NAIVE, waitForLiveTable } from "../support/e2e";
 
 // The real thing, in real time: about 37 seconds, so this test is deliberately a single flow.
 describe("recording a benchmark run", () => {
   it("warms up, counts down, and downloads a valid result file", { defaultCommandTimeout: 60000 }, () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
 
     cy.get(".record-button").should("have.text", "Record 30-second run").click();

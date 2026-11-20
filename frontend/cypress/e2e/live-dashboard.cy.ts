@@ -1,18 +1,18 @@
-import { waitForLiveTable } from "../support/e2e";
+import { NAIVE, waitForLiveTable } from "../support/e2e";
 
 // These tests need the real backend running on port 8080. Run it with a light feed
 // (INSTRUMENTS=200 UPDATES_PER_SEC=500 npm start) so the page stays responsive on any machine.
 
 describe("the live dashboard", () => {
   it("connects to the backend and fills the table", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("h1").should("have.text", "Trading Dashboard");
     cy.title().should("equal", "Trading Dashboard");
   });
 
   it("shows the reference data and readable prices for the first instrument", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("tbody tr").first().find("td").then(($cells) => {
       // The data cells after the symbol, in column order.
@@ -34,7 +34,7 @@ describe("the live dashboard", () => {
   });
 
   it("prices every kind of instrument with its own number of decimals", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("tbody tr").then(($rows) => {
       // Columns: symbol (th), then name, currency, bid, ask, spread, last, prev close, chg, sizes, volume, tick, decimals.
@@ -54,7 +54,7 @@ describe("the live dashboard", () => {
   });
 
   it("keeps updating as the feed streams", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("tbody").invoke("text").then((before) => {
       cy.get("tbody", { timeout: 15000 }).should(($tbody) => expect($tbody.text()).not.to.equal(before));
@@ -62,7 +62,7 @@ describe("the live dashboard", () => {
   });
 
   it("shows live numbers in the performance panel", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.contains(".hud-metric", "Messages per second").find("dd", { timeout: 15000 }).should(($dd) => {
       expect($dd.text()).not.to.equal("–");
@@ -78,7 +78,7 @@ describe("the live dashboard", () => {
         response.setDelay(1500);
       });
     });
-    cy.visit("/");
+    cy.visit(NAIVE);
     cy.get("[role=status]").should("contain.text", "Loading");
     cy.get("svg.skeleton").should("exist");
     cy.get("svg.skeleton animateTransform").should("exist");
@@ -88,7 +88,7 @@ describe("the live dashboard", () => {
 
   it("shows an error with a way to reload when the page code cannot be downloaded", () => {
     cy.intercept("**/assets/NaivePage*.js", { forceNetworkError: true });
-    cy.visit("/");
+    cy.visit(NAIVE);
     cy.get("[role=alert]").should("contain.text", "This view could not be loaded.");
     cy.contains("button", "Reload").should("be.visible");
   });

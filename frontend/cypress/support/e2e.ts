@@ -1,6 +1,9 @@
 import "cypress-axe";
 import "cypress-real-events";
 
+/** The Naive tab, which has the live table. The default address (/) is the Optimized tab. */
+export const NAIVE = "/#/naive";
+
 // Every test starts on a light OS with no motion preference, whatever machine runs the tests (the real
 // setting varies, and a dark-mode Mac would otherwise change the starting theme). Tests that need a
 // different setting emulate it themselves, and the emulation is cleared again afterwards.

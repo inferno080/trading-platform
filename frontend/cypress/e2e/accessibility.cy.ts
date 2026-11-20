@@ -1,5 +1,5 @@
 import type { Result } from "axe-core";
-import { emulateMedia, waitForLiveTable } from "../support/e2e";
+import { NAIVE, emulateMedia, waitForLiveTable } from "../support/e2e";
 
 // WCAG 2.2 level AA, as far as an automated scan can check it. Manual checks (screen reader, zoom
 // by eye) are still needed; automated tools find roughly a third of issues.
@@ -23,8 +23,8 @@ const scan = () => {
   cy.checkA11y(undefined, AXE_OPTIONS, logViolations);
 };
 
-const visitWith = (settings: { theme?: "light" | "dark"; locale?: string }) =>
-  cy.visit("/", {
+const visitWith = (settings: { theme?: "light" | "dark"; locale?: string }, url = NAIVE) =>
+  cy.visit(url, {
     onBeforeLoad(win) {
       if (settings.theme) win.localStorage.setItem("theme", settings.theme);
       if (settings.locale) win.localStorage.setItem("locale", settings.locale);
@@ -48,20 +48,20 @@ describe("accessibility (automated WCAG 2.2 AA scan)", () => {
         response.setDelay(3000);
       });
     });
-    cy.visit("/");
+    cy.visit(NAIVE);
     cy.get("svg.skeleton").should("exist");
     scan();
   });
 
   it("has no violations when the page code fails to load", () => {
     cy.intercept("**/assets/NaivePage*.js", { forceNetworkError: true });
-    cy.visit("/");
+    cy.visit(NAIVE);
     cy.get("[role=alert]").should("exist");
     scan();
   });
 
   it("has no violations while a recording is in progress", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get(".record-button").click();
     cy.get(".record-button").should("have.attr", "data-phase");
@@ -69,16 +69,28 @@ describe("accessibility (automated WCAG 2.2 AA scan)", () => {
   });
 
   it("has no violations in the high-contrast theme", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.document().then((doc) => doc.documentElement.setAttribute("data-theme", "high-contrast"));
     scan();
   });
 });
 
+describe("accessibility of the Optimized tab (the default view)", () => {
+  for (const theme of ["light", "dark"] as const) {
+    for (const locale of ["en-US", "ja-JP"]) {
+      it(`has no violations: ${theme} theme, ${locale}`, () => {
+        visitWith({ theme, locale }, "/");
+        cy.get(".placeholder").should("exist");
+        scan();
+      });
+    }
+  }
+});
+
 describe("accessibility details a scanner cannot fully judge", () => {
   it("makes every control at least 24 by 24 pixels (WCAG 2.5.8)", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("button, select, [role=tab], [role=switch]").each(($control) => {
       const { width, height } = $control[0]?.getBoundingClientRect() ?? { width: 0, height: 0 };
@@ -94,14 +106,14 @@ describe("accessibility details a scanner cannot fully judge", () => {
         response.setDelay(2000);
       });
     });
-    cy.visit("/");
+    cy.visit(NAIVE);
     cy.get("svg.skeleton rect").should("exist");
     cy.get("svg.skeleton animateTransform").should("not.exist");
   });
 
   it("reflows to a 320 pixel wide screen without sideways scrolling (WCAG 1.4.10)", () => {
     cy.viewport(320, 640);
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.document().then((doc) => {
       expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth);
@@ -110,7 +122,7 @@ describe("accessibility details a scanner cannot fully judge", () => {
 
   it("keeps the table's own horizontal scrolling inside its labelled region", () => {
     cy.viewport(320, 640);
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get(".table-wrap").should("have.attr", "tabindex", "0").and("have.attr", "aria-label");
     cy.get(".table-wrap").then(($wrap) => {
@@ -119,7 +131,7 @@ describe("accessibility details a scanner cannot fully judge", () => {
   });
 
   it("does not rely on colour alone to show connection status", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get(".status").invoke("text").should("not.be.empty");
   });

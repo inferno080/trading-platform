@@ -1,4 +1,4 @@
-import { emulateMedia, waitForLiveTable } from "../support/e2e";
+import { NAIVE, emulateMedia, waitForLiveTable } from "../support/e2e";
 
 const DARK_BACKGROUND = "rgb(11, 15, 20)"; // --color-bg in the dark theme
 const LIGHT_BACKGROUND = "rgb(255, 255, 255)"; // --color-bg in the light theme
@@ -40,7 +40,7 @@ describe("theme", () => {
   });
 
   it("restyles the whole page, including the table and the HUD", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get(".hud").invoke("css", "background-color").then((light) => {
       cy.get("[role=switch]").click();
@@ -57,7 +57,7 @@ describe("language", () => {
   });
 
   it("switches to Japanese, including numbers, the document language and the title", () => {
-    cy.visit("/");
+    cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("select").select("日本語");
     cy.get("html").should("have.attr", "lang", "ja-JP");

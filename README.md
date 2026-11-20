@@ -4,7 +4,7 @@
 
 A real-time trading dashboard built to explore streaming-data performance in the browser: a separate mock market-data server pushes tens of thousands of quote updates per second over WebSocket into a React UI.
 
-**Status:** backend baseline done; frontend has the deliberately naive client and the performance HUD. The optimized pipeline is next.
+**Status:** backend with chaos commands and per-instrument reference data is done; the frontend has the deliberately naive client and the performance HUD, and the Optimized tab (the default) is being built step by step.
 
 ## Architecture
 
@@ -166,7 +166,8 @@ Located in [`frontend/`](frontend/). Vite, React 19, TypeScript, [`react-intl`](
 frontend/src/
   protocol/      wire types (mirrored from the backend) and MessagePack codec
   iterations.ts  registry of frontend iterations, one entry per tab
-  shell/         accessible tab bar and hash routing (#/naive)
+  shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
+  optimized/     the optimized version (the default tab), built step by step
   naive/         the baseline: WebSocket straight into React state, plain table of all rows
   hud/           performance HUD, metrics collector, and the run recorder
   i18n/          react-intl setup; en-US messages, and en-GB overrides (only the strings that differ)
@@ -174,7 +175,7 @@ frontend/src/
   styles/        design tokens (light, dark, high contrast) and base styles
 ```
 
-Each version of the frontend is an **iteration**, shown as a tab in the header and linkable by URL (for example `http://localhost:4173/#/naive`). Only the active iteration is mounted, so an inactive one never holds a socket open or competes for CPU during a measurement. Each iteration's page is loaded with a dynamic import, so its code (and any heavy library it uses, such as a grid) is only downloaded when its tab is opened and never inflates another iteration. To add an iteration, build its page and add one entry to `frontend/src/iterations.ts`.
+Each version of the frontend is an **iteration**, shown as a tab in the header and linkable by URL (for example `http://localhost:4173/#/naive`). The first tab, **Optimized**, is the default. Each iteration's page is loaded with a dynamic import and wrapped in the same error handling, so a failed download shows a message with a Reload button instead of a blank page. Only the active iteration is mounted: a tab you are not looking at does not exist in the page. It holds no WebSocket connection, no timers and no table rows, and leaving the Naive tab closes its connection and frees its 5,000 rows. Its code is not even downloaded until you open it. To add an iteration, build its page and add one entry to `frontend/src/iterations.ts`.
 
 The first iteration, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
 import {
@@ -10,8 +11,6 @@ import {
 } from "../protocol/messages";
 
 export type FeedStatus = "connecting" | "live" | "closed" | "error";
-
-const WS_URL: string = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
 
 /** How long to wait for the reference data after the session before giving up and saying so. */
 export const REFERENCE_TIMEOUT_MS = 10_000;

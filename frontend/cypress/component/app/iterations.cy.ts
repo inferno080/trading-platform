@@ -10,6 +10,11 @@ describe("the iteration registry", () => {
     expect(DEFAULT_ITERATION_ID).to.equal(ITERATIONS[0]?.id);
   });
 
+  it("opens on the Optimized iteration, with Naive after it", () => {
+    expect(DEFAULT_ITERATION_ID).to.equal("optimized");
+    expect(ITERATION_IDS).to.deep.equal(["optimized", "naive"]);
+  });
+
   it("uses URL-safe ids", () => {
     for (const id of ITERATION_IDS) expect(id).to.match(/^[a-z0-9-]+$/);
   });

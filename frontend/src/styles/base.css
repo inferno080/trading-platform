@@ -265,6 +265,36 @@ main:focus {
   color: var(--color-stale);
 }
 
+/* Optimized page: a few labelled facts reported by the worker */
+.optimized-page {
+  display: grid;
+  gap: var(--space-4);
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.fact dt {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+.fact dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+}
+.hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
 /* Loading placeholders (see components/SkeletonSvg.tsx) */
 .skeleton {
   display: block;
