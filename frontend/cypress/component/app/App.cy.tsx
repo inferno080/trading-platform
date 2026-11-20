@@ -1,12 +1,13 @@
 import { App } from "../../../src/App";
 import { collector } from "../../../src/hud/collector";
 import { FakeWebSocket, installFakeWebSocket } from "../../support/fakeWebSocket";
-import { withI18n } from "../../support/render";
+import { FakeWorker } from "../../support/fakeWorker";
+import { withFakeWorker, withI18n } from "../../support/render";
 
 const mountApp = () => {
   installFakeWebSocket();
   collector.reset();
-  cy.mount(withI18n(<App />));
+  cy.mount(withI18n(withFakeWorker(<App />)));
 };
 
 /** Assert that a description paragraph fits on one line. */
@@ -108,35 +109,55 @@ describe("App", () => {
   });
 });
 
-// Only the tab that is shown exists. A tab you are not looking at must not hold a connection, a timer or 5,000
-// table rows, so it cannot slow down the one you are looking at.
+// Only the tab that is shown exists. A tab you are not looking at must not hold a connection, a worker, a timer or
+// 5,000 table rows, so it cannot slow down the one you are looking at.
 describe("App: inactive tabs are destroyed", () => {
-  it("opens no connection at all while the Optimized tab is shown", () => {
+  const workers = () => FakeWorker.instances;
+
+  it("starts the Optimized worker, and opens no connection on the page itself", () => {
     mountApp();
-    cy.get(".placeholder").should("exist");
-    cy.then(() => expect(FakeWebSocket.instances).to.have.length(0));
+    cy.get(".optimized-page").should("exist");
+    cy.wrap(FakeWorker.instances).should("have.length", 1); // React starts the worker just after the page appears
+    cy.then(() => {
+      expect(workers()).to.have.length(1); // the connection belongs to the worker, not to the page
+      expect(FakeWebSocket.instances).to.have.length(0);
+    });
   });
 
   it("does not even download the Naive code until its tab is opened", () => {
     mountApp();
     cy.get("#tab-naive").should("have.attr", "aria-selected", "false");
-    cy.get(".status").should("not.exist"); // the Naive page has not been rendered
-    cy.get(".table-wrap").should("not.exist");
+    cy.get(".table-wrap").should("not.exist"); // the Naive page has not been rendered
+    cy.then(() => expect(FakeWebSocket.instances).to.have.length(0));
   });
 
-  it("opens one connection when Naive is opened, and closes it for good when leaving", () => {
+  it("ends the Optimized worker when Naive is opened, and opens one connection for Naive", () => {
+    mountApp();
+    cy.get(".optimized-page").should("exist");
+    cy.wrap(FakeWorker.instances).should("have.length", 1);
+    cy.get("#tab-naive").click();
+    cy.get(".optimized-page").should("not.exist");
+    cy.get(".status").should("exist");
+    cy.then(() => {
+      expect(workers()[0]?.terminated).to.equal(true);
+      expect(workers()[0]?.onmessage).to.equal(null); // nothing is listening any more
+      expect(FakeWebSocket.instances).to.have.length(1);
+    });
+  });
+
+  it("closes the Naive connection for good when leaving, and starts a fresh worker for Optimized", () => {
     mountApp();
     cy.get("#tab-naive").click();
     cy.get(".status").should("exist");
-    cy.then(() => expect(FakeWebSocket.instances).to.have.length(1));
-
     cy.get("#tab-optimized").click();
-    cy.get(".placeholder").should("exist");
-    cy.get(".status").should("not.exist"); // the Naive page is gone from the page
+    cy.get(".optimized-page").should("exist");
+    cy.wrap(FakeWorker.instances).should("have.length", 2);
     cy.then(() => {
       const [naiveSocket] = FakeWebSocket.instances;
       expect(naiveSocket?.closed).to.equal(true);
-      expect(naiveSocket?.onmessage).to.equal(null); // nothing is listening any more
+      expect(naiveSocket?.onmessage).to.equal(null);
+      expect(workers()).to.have.length(2);
+      expect(workers()[1]?.terminated).to.equal(false);
     });
   });
 
@@ -149,14 +170,14 @@ describe("App: inactive tabs are destroyed", () => {
     cy.get("tbody").should("not.exist");
   });
 
-  it("opens a fresh connection each time Naive is opened again", () => {
+  it("opens a fresh Naive connection each time the tab is opened again", () => {
+    window.location.hash = "#/naive";
     mountApp();
-    cy.get("#tab-naive").click();
     cy.get(".status").should("exist");
     cy.get("#tab-optimized").click();
-    cy.get(".status").should("not.exist");
+    cy.get(".optimized-page").should("exist");
     cy.get("#tab-naive").click();
-    cy.get(".status").should("exist");
+    cy.get(".table-wrap, [role=status]").should("exist");
     cy.then(() => {
       expect(FakeWebSocket.instances).to.have.length(2);
       expect(FakeWebSocket.instances[0]?.closed).to.equal(true); // the old one stays closed

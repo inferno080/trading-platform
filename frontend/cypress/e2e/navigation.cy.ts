@@ -1,4 +1,4 @@
-import { NAIVE, waitForLiveTable } from "../support/e2e";
+import { NAIVE, waitForLiveGrid, waitForLiveTable } from "../support/e2e";
 
 describe("navigation and keyboard use", () => {
   it("opens on the Optimized tab by default", () => {
@@ -22,7 +22,7 @@ describe("navigation and keyboard use", () => {
 
   it("writes the selected tab into the URL, and shows live data only on the Naive tab", () => {
     cy.visit("/");
-    cy.get(".placeholder").should("exist");
+    cy.get(".optimized-page").should("exist");
     cy.get("tbody").should("not.exist");
 
     cy.get("#tab-naive").click();
@@ -31,7 +31,7 @@ describe("navigation and keyboard use", () => {
 
     cy.get("#tab-optimized").click();
     cy.location("hash").should("equal", "#/optimized");
-    cy.get(".placeholder").should("exist");
+    cy.get(".optimized-page").should("exist");
     cy.get("tbody").should("not.exist"); // the Naive table is gone from the page, not just hidden
   });
 
@@ -52,7 +52,7 @@ describe("navigation and keyboard use", () => {
     const was = (prefix: string) => requested.some((name) => name.startsWith(prefix));
 
     cy.visit("/");
-    cy.get(".placeholder").should("exist").then(() => {
+    cy.get(".optimized-page").should("exist").then(() => {
       expect(was("OptimizedPage"), "the default tab's code").to.equal(true);
       expect(was("NaivePage"), "the Naive code before opening its tab").to.equal(false);
     });
@@ -86,6 +86,7 @@ describe("navigation and keyboard use", () => {
 
   it("shows a clear focus ring on whatever has keyboard focus", () => {
     cy.visit("/");
+    waitForLiveGrid(); // let the page settle before pressing keys
     cy.get("body").realPress("Tab");
     cy.realPress("Tab");
     cy.focused().should("have.attr", "role", "switch").and("have.css", "outline-style", "solid").and("have.css", "outline-width", "2px");

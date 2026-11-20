@@ -25,4 +25,15 @@ describe("ErrorBoundary", () => {
     );
     cy.contains("fallback").should("exist");
   });
+
+  it("also says what failed in the console, since the fallback does not", () => {
+    Cypress.once("uncaught:exception", () => false);
+    cy.window().then((win) => cy.spy(win.console, "error").as("consoleError"));
+    cy.mount(
+      <ErrorBoundary fallback={<p>fallback</p>}>
+        <Boom />
+      </ErrorBoundary>,
+    );
+    cy.get("@consoleError").should("be.calledWithMatch", "A view failed to render:");
+  });
 });

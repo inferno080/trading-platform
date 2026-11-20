@@ -265,34 +265,77 @@ main:focus {
   color: var(--color-stale);
 }
 
-/* Optimized page: a few labelled facts reported by the worker */
+/* Optimized page */
 .optimized-page {
   display: grid;
   gap: var(--space-4);
 }
-.facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: var(--space-3);
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-surface);
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+.refresh-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.875rem;
+}
+.refresh-control input {
+  width: 5rem;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
-.fact dt {
-  font-size: 0.75rem;
+.refresh-hint {
   color: var(--color-text-muted);
 }
-.fact dd {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 1rem;
-}
-.hint {
-  margin: 0;
+.frozen-note {
   font-size: 0.875rem;
-  color: var(--color-text-muted);
+  color: var(--color-stale);
+}
+/* The freeze toggle shows its state with a filled style, not by color alone (it is also announced as pressed). */
+.toggle-button[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-color: var(--color-accent);
+}
+
+/* Quotes grid (AG Grid takes its colors from the design tokens; see QuotesGrid.tsx) */
+.grid-wrap {
+  height: min(70vh, 760px);
+  min-height: 360px;
+}
+.grid-wrap .cell-up {
+  color: var(--color-up);
+}
+/* The flash of a changed value is green when it moved up and red when it moved down. AG Grid reads the color from
+   this variable; values with no direction (sizes, volume) keep the grid's neutral flash. */
+.grid-wrap .flash-up {
+  --ag-value-change-value-highlight-background-color: color-mix(in srgb, var(--color-up) 30%, transparent);
+}
+.grid-wrap .flash-down {
+  --ag-value-change-value-highlight-background-color: color-mix(in srgb, var(--color-down) 30%, transparent);
+}
+.grid-wrap .cell-down {
+  color: var(--color-down);
+}
+/* AG Grid mirrors the header of a right-aligned column, which put its filter button on the left. Every column gets the
+   button to the right of its name, and a right-aligned name sits against the button. */
+.grid-wrap .ag-right-aligned-header .ag-cell-label-container {
+  flex-direction: row-reverse;
+}
+.grid-wrap .ag-right-aligned-header .ag-header-cell-label {
+  justify-content: flex-end;
+}
+.grid-wrap .ag-cell {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Loading placeholders (see components/SkeletonSvg.tsx) */

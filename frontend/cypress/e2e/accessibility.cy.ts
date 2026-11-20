@@ -1,5 +1,5 @@
 import type { Result } from "axe-core";
-import { NAIVE, emulateMedia, waitForLiveTable } from "../support/e2e";
+import { NAIVE, emulateMedia, waitForLiveGrid, waitForLiveTable } from "../support/e2e";
 
 // WCAG 2.2 level AA, as far as an automated scan can check it. Manual checks (screen reader, zoom
 // by eye) are still needed; automated tools find roughly a third of issues.
@@ -76,16 +76,37 @@ describe("accessibility (automated WCAG 2.2 AA scan)", () => {
   });
 });
 
+// A changed value flashes a highlight behind its text for a second. That is a moment in time, not the page's state, and
+// a scan that lands inside it reads the flash color as the background. So these scans run with reduced motion, which
+// is when the grid does not flash; the flash itself is checked in the component tests.
 describe("accessibility of the Optimized tab (the default view)", () => {
+  beforeEach(() => emulateMedia([{ name: "prefers-reduced-motion", value: "reduce" }]));
+
   for (const theme of ["light", "dark"] as const) {
     for (const locale of ["en-US", "ja-JP"]) {
       it(`has no violations: ${theme} theme, ${locale}`, () => {
         visitWith({ theme, locale }, "/");
-        cy.get(".placeholder").should("exist");
+        waitForLiveGrid();
         scan();
       });
     }
   }
+
+  it("has no violations while the grid is frozen", () => {
+    cy.visit("/");
+    waitForLiveGrid();
+    cy.contains("button", "Freeze stream").click();
+    scan();
+  });
+
+  it("reflows to a 320 pixel wide screen without sideways scrolling of the page (WCAG 1.4.10)", () => {
+    cy.viewport(320, 640);
+    cy.visit("/");
+    waitForLiveGrid();
+    cy.document().then((doc) => {
+      expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth);
+    });
+  });
 });
 
 describe("accessibility details a scanner cannot fully judge", () => {

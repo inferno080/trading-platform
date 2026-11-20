@@ -40,6 +40,16 @@ describe("locales", () => {
     expect(MESSAGES["en-GB"]["app.title"]).to.equal(english["app.title"]);
   });
 
+  it("spells Optimised with an s in UK English, and Optimized with a z in US English", () => {
+    expect(MESSAGES["en-GB"]["tab.optimized"]).to.equal("Optimised");
+    expect(MESSAGES["en-GB"]["optimized.region"]).to.equal("Optimised version");
+    expect(MESSAGES["en-US"]["tab.optimized"]).to.equal("Optimized");
+  });
+
+  it("has no American -ize spellings left in UK English", () => {
+    for (const [id, text] of Object.entries(MESSAGES["en-GB"])) expect(text, id).not.to.match(/\b\w{3,}iz(e|ed|es|ing|ation)\b/i);
+  });
+
   it("serves the Japanese translation for ja-JP", () => {
     expect(MESSAGES["ja-JP"]["app.title"]).to.equal(japanese["app.title"]);
     expect(MESSAGES["ja-JP"]["app.title"]).not.to.equal(english["app.title"]);

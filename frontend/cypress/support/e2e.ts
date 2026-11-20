@@ -35,3 +35,9 @@ export function waitForLiveTable(): void {
   cy.get(".status", { timeout: 20000 }).should("have.attr", "data-status", "live");
   cy.get("tbody tr", { timeout: 20000 }).should("have.length.greaterThan", 10);
 }
+
+/** Wait until the Optimized tab is live and its grid has rows. */
+export function waitForLiveGrid(): void {
+  cy.get(".status", { timeout: 20000 }).should("have.attr", "data-status", "live");
+  cy.get(".ag-row[row-id]", { timeout: 20000 }).should("have.length.greaterThan", 5);
+}

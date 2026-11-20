@@ -10,14 +10,6 @@
   "tab.optimized": "最適化版",
   "tab.optimized.description": "Web Workerが接続を管理し、更新は集約されてアニメーションフレームごとに1回だけ反映され、AG Gridは画面に見える行だけを描画します。",
   "optimized.region": "最適化版",
-  "optimized.fact.thread": "接続の実行場所",
-  "optimized.fact.protocol": "プロトコルバージョン",
-  "optimized.fact.instruments": "銘柄数",
-  "optimized.fact.updates": "目標更新数/秒",
-  "optimized.fact.reference": "参照データ",
-  "optimized.reference.waiting": "待機中",
-  "optimized.reference.loaded": "読み込み済み（{count, number}銘柄）",
-  "optimized.gridSoon": "背後のパイプラインが完成すると、ここにグリッドが表示されます。",
   "tab.naive": "ナイーブ",
   "tab.naive.description": "WebSocketのメッセージを受信するたびにReactの状態へ直接反映し、表全体を再描画します。これが改善すべき基準です。",
   "status.connecting": "接続中",
@@ -57,5 +49,10 @@
   "table.volume": "出来高",
   "table.tickSize": "呼値",
   "table.decimals": "小数桁",
-  "table.noReference": "この銘柄の参照データがありません"
+  "table.noReference": "この銘柄の参照データがありません",
+  "optimized.freeze": "ストリームを停止",
+  "optimized.frozen": "ストリームを停止中です。更新は受信され続け、グリッドは停止した時点の表示のままです。",
+  "grid.region": "リアルタイム気配値グリッド",
+  "optimized.refresh": "グリッドの更新間隔（秒）",
+  "optimized.refresh.hint": "0で毎フレーム描画します。最大{max, number}秒。"
 }

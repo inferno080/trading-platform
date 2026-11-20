@@ -1,3 +1,4 @@
+import type { Row } from "../../src/optimized/feedStore";
 import {
   PROTOCOL_VERSION,
   type Delta,
@@ -79,3 +80,28 @@ export const makeReference = (id: number, overrides: Partial<InstrumentReference
 export const makeReferenceData = (
   instruments: InstrumentReference[] = [makeReference(0), makeReference(1), makeReference(2)],
 ): ReferenceData => ({ t: "reference", instruments });
+
+/** A grid row for the first instrument: a 2-decimal USD equity at 299.17 / 299.21, last 299.20, previous close 298.00. */
+export const makeRow = (overrides: Partial<Row> = {}): Row => ({
+  id: 0,
+  sym: "AAA",
+  name: "Apex Systems Inc.",
+  currency: "USD",
+  decimals: 2,
+  tickSize: 0.01,
+  prevClose: 298,
+  bid: 299.17,
+  ask: 299.21,
+  spread: 0.04,
+  last: 299.2,
+  change: 299.2 / 298 - 1,
+  bidSz: 2700,
+  askSz: 3500,
+  vol: 8600,
+  dirBid: 0,
+  dirAsk: 0,
+  dirLast: 0,
+  stale: false,
+  updatedAt: 0,
+  ...overrides,
+});

@@ -24,6 +24,15 @@ class Collector {
     this.latencies.push(latencyMs);
   }
 
+  // Called with the counters of a worker's batch (a worker counts for itself, because the page never sees the raw frames).
+  onBatch(stats: { messages: number; updatesIn: number; gaps: number; latencies: number[] }): void {
+    this.messages += stats.messages;
+    this.updates += stats.updatesIn;
+    for (const latency of stats.latencies) this.latencies.push(latency);
+    this.gaps += stats.gaps;
+    this.totalGaps += stats.gaps;
+  }
+
   // Called when a sequence gap is detected.
   onGap(): void {
     this.gaps++;

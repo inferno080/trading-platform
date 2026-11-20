@@ -10,14 +10,6 @@
   "tab.optimized": "Optimized",
   "tab.optimized.description": "A Web Worker owns the connection, updates are conflated and flushed once per animation frame, and AG Grid draws only the rows on screen.",
   "optimized.region": "Optimized version",
-  "optimized.fact.thread": "Connection runs in",
-  "optimized.fact.protocol": "Protocol version",
-  "optimized.fact.instruments": "Instruments",
-  "optimized.fact.updates": "Target updates per second",
-  "optimized.fact.reference": "Reference data",
-  "optimized.reference.waiting": "Waiting",
-  "optimized.reference.loaded": "Loaded ({count, number} instruments)",
-  "optimized.gridSoon": "The grid will appear here once the pipeline behind it is built.",
   "tab.naive": "Naive",
   "tab.naive.description": "Every WebSocket message goes straight into React state and the whole table re-renders. This is the baseline to beat.",
   "status.connecting": "Connecting",
@@ -57,5 +49,10 @@
   "table.volume": "Volume",
   "table.tickSize": "Tick size",
   "table.decimals": "Decimals",
-  "table.noReference": "No reference data for this instrument"
+  "table.noReference": "No reference data for this instrument",
+  "optimized.freeze": "Freeze stream",
+  "optimized.frozen": "Stream frozen. Updates keep arriving; the grid shows the moment you froze it.",
+  "grid.region": "Live quotes grid",
+  "optimized.refresh": "Refresh grid every (seconds)",
+  "optimized.refresh.hint": "0 draws every frame. Up to {max, number}."
 }

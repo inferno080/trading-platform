@@ -4,7 +4,7 @@
 
 A real-time trading dashboard built to explore streaming-data performance in the browser: a separate mock market-data server pushes tens of thousands of quote updates per second over WebSocket into a React UI.
 
-**Status:** backend with chaos commands and per-instrument reference data is done; the frontend has the deliberately naive client and the performance HUD, and the Optimized tab (the default) is being built step by step.
+**Status:** backend with chaos commands and per-instrument reference data is done; the frontend has the deliberately naive client and the performance HUD, and the Optimized tab (the default) now has a Web Worker, conflation and an AG Grid; reconnecting and more HUD metrics are still to come.
 
 ## Architecture
 
@@ -167,7 +167,8 @@ frontend/src/
   protocol/      wire types (mirrored from the backend) and MessagePack codec
   iterations.ts  registry of frontend iterations, one entry per tab
   shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
-  optimized/     the optimized version (the default tab), built step by step
+  feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
+  optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
   naive/         the baseline: WebSocket straight into React state, plain table of all rows
   hud/           performance HUD, metrics collector, and the run recorder
   i18n/          react-intl setup; en-US messages, and en-GB overrides (only the strings that differ)
@@ -177,9 +178,25 @@ frontend/src/
 
 Each version of the frontend is an **iteration**, shown as a tab in the header and linkable by URL (for example `http://localhost:4173/#/naive`). The first tab, **Optimized**, is the default. Each iteration's page is loaded with a dynamic import and wrapped in the same error handling, so a failed download shows a message with a Reload button instead of a blank page. Only the active iteration is mounted: a tab you are not looking at does not exist in the page. It holds no WebSocket connection, no timers and no table rows, and leaving the Naive tab closes its connection and frees its 5,000 rows. Its code is not even downloaded until you open it. To add an iteration, build its page and add one entry to `frontend/src/iterations.ts`.
 
-The first iteration, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
+The **Optimized** iteration moves the work off the page, in four stages:
 
-The Naive table shows fourteen columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, volume, tick size and decimals. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The same columns will appear in the optimized versions, so every version does the same visible work and the benchmark compares like with like.
+1. **A Web Worker owns the connection.** It opens the WebSocket, checks the protocol version, asks for the reference data once, decodes every frame, keeps the full market state, and recovers from a missed frame (a sequence gap) by asking the server for a new snapshot. Leaving the tab terminates the worker and its connection.
+2. **The worker conflates.** An instrument that ticked twenty times between two frames is sent once, with its latest state. The page asks for what changed **once per animation frame**, with at most one request outstanding, so a slow page just gets more conflation. If an answer never comes, it asks again after 2 seconds.
+3. **A store outside React.** The answer goes into a small store that joins each quote with its reference data and turns wire integers into real prices. React does not render 60 times a second; only the grid hears about the rows that changed.
+4. **AG Grid draws only what is on screen.** Changed rows reach AG Grid Community as one transaction. Only the modules the grid uses are registered, which keeps the chunk about 26% smaller than registering everything.
+
+What you see and can change:
+
+- **Refresh every (seconds)**, a number box that starts at **1.5**. The grid collects the changes and redraws them all together once per interval, showing the latest state of each row; **0** redraws every change as it arrives. The data still arrives and is counted at full speed. One shared redraw means everything that changed flashes in the same instant, which is more noticeable at long intervals; a short interval hides it.
+- **Flashing** is per cell and coloured by direction: green when a value moved up, red when it moved down, with ▲/▼ marks as well so it never relies on colour alone. Chg % flashes by its own sign. The flash is off when the OS asks for reduced motion.
+- **Sort and filter** on every column. Each heading has a filter button beside its name. With the keyboard, Tab to a heading, then **Enter** sorts and **Ctrl+Enter** opens its filter (Alt+Down also works).
+- **Freeze stream** holds the numbers still while the worker keeps receiving; resuming catches up in one step.
+- Rows with no update for 5 seconds are marked in the data but drawn as normal text, and nothing is marked while the tab is hidden.
+- The performance panel above the grid shows the live rates; there is no separate panel of connection facts.
+
+The first iteration built, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
+
+The Naive table shows fourteen columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, volume, tick size and decimals. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The Optimized tab shows the same fourteen columns, so every version does the same visible work and the benchmark compares like with like.
 
 ### Run it
 
@@ -263,14 +280,17 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 ### Troubleshooting
 
 - **Cypress fails to start with `bad option: --no-sandbox`:** the `ELECTRON_RUN_AS_NODE` environment variable is set, which VS Code does for processes it launches. Run Cypress from a normal terminal, or prefix the command with `env -u ELECTRON_RUN_AS_NODE`.
+- **Cypress's Electron browser closes unexpectedly (`Timed out waiting for the browser to connect`):** run the same command with `--browser chrome`. Leftover headless Chrome processes from earlier runs can also get in the way of opening Chrome; quit any Chrome started by Cypress.
+- **Files named like `Hud 2.tsx` appear in the project:** they are copies made by Finder or a sync service, not part of the repository. Delete them; they break `npm run lint`.
 - **Node version:** CI uses Node 22. Cypress 15 and Vite 6 are used on purpose; Cypress 16 requires Vite 8, which needs a newer Node.
 
 ## Roadmap
 
 - [x] Frontend: naive React client, to capture a baseline
-- [ ] Web Worker for the socket and decoding, with per-symbol conflation
-- [ ] Virtualized grid, with cell flash on change and stale-data indicators
-- [ ] Reconnect, gap detection and resync in the UI
+- [x] Web Worker for the socket and decoding, with per-symbol conflation
+- [x] Virtualized grid (AG Grid), with cell flash on change, stale-data indicators, sort, filter and freeze
+- [x] Gap detection and resync in the worker
+- [ ] Reconnect with a connection state machine
 - [ ] Performance HUD: FPS, messages/sec, latency percentiles, long tasks, heap
 - [ ] Backend: L2 depth, trades stream, per-symbol subscribe, chaos controls
 - [x] Drift-corrected simulator timing

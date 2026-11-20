@@ -24,6 +24,7 @@ const connection = new FeedConnection(
 
 scope.onmessage = (event) => {
   if (event.data.type === "connect") connection.connect(event.data.url);
+  else connection.pull();
 };
 
 // Tell the page the worker is up, and what kind of scope it runs in (a window would say "Window").
