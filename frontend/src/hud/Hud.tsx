@@ -52,17 +52,27 @@ function RecordNote({ record }: { record: RecordState }) {
     <p className="hud-note" role="status">
       {record.status === "done" && t("hud.recorded", { fileName: record.fileName })}
       {record.status === "done" && record.tabHidden && ` ${t("hud.tabHiddenWarning")}`}
+      {record.status === "done" && record.refreshChanged && ` ${t("hud.refreshChangedWarning")}`}
     </p>
   );
+}
+
+/** A grid that redraws less often than every change looks smoother than it is, so say so before anyone records it. */
+function RefreshWarning({ seconds }: { seconds: number | null }) {
+  const t = useT();
+  if (!seconds) return null; // null: no such setting (Naive); 0: every change, which is the fair way to measure
+  return <p className="hud-note hud-warning">{t("hud.refreshWarning", { seconds })}</p>;
 }
 
 interface HudProps {
   session: Session | null;
   mode: PipelineMode;
+  /** How often the grid redraws, in seconds (0 for every change), for tabs that have that setting. */
+  refreshSeconds?: number | null;
 }
 
 /** Performance panel: live frame rate and feed stats, plus a button that records a run to a JSON file. */
-export function Hud({ session, mode }: HudProps) {
+export function Hud({ session, mode, refreshSeconds = null }: HudProps) {
   const intl = useIntl();
   const t = useT();
   const [sample, setSample] = useState<HudSample | null>(null);
@@ -75,7 +85,7 @@ export function Hud({ session, mode }: HudProps) {
     const run = recording.current;
     if (!run) return;
 
-    advanceRecording(run, next, latencies, document.hidden);
+    advanceRecording(run, next, latencies, document.hidden, refreshSeconds);
     const progress = recordingStateAfter(run.tick);
     if (progress) {
       setRecord(progress);
@@ -84,11 +94,11 @@ export function Hud({ session, mode }: HudProps) {
     const fileName = resultFileName(mode, session);
     downloadJson(fileName, buildResult(run, mode, session));
     recording.current = null;
-    setRecord({ status: "done", fileName, tabHidden: run.tabHidden });
+    setRecord({ status: "done", fileName, tabHidden: run.tabHidden, refreshChanged: run.refreshChanged });
   });
 
   const startRecording = () => {
-    recording.current = { tick: 0, samples: [], latencies: [], tabHidden: false };
+    recording.current = { tick: 0, samples: [], latencies: [], tabHidden: false, refreshSeconds, refreshChanged: false };
     setRecord({ status: "recording", phase: "warmup", remaining: WARMUP_SECONDS });
   };
 
@@ -120,6 +130,7 @@ export function Hud({ session, mode }: HudProps) {
       </dl>
 
       {!import.meta.env.PROD && <p className="hud-note hud-warning">{t("hud.devWarning")}</p>}
+      <RefreshWarning seconds={refreshSeconds} />
       <RecordNote record={record} />
     </section>
   );

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { collector } from "../../../src/hud/collector";
 import { Hud } from "../../../src/hud/Hud";
 import { makeSession } from "../../support/fixtures";
@@ -130,6 +131,71 @@ describe("Hud", () => {
     tickSeconds(33);
     cy.get(".hud-note[role=status]").should("contain.text", "The tab was hidden");
     cy.then(async () => expect(JSON.parse(await (saved.blob as Blob).text()).tabHidden).to.equal(true));
+  });
+
+  describe("the refresh interval", () => {
+    it("warns that a grid redrawing every 1.5 s flatters the numbers", () => {
+      mountHud({ mode: "optimized", refreshSeconds: 1.5 });
+      cy.get(".hud-warning").should("contain.text", "redraws every 1.5 s").and("contain.text", "Set the refresh interval to 0");
+    });
+
+    it("does not warn at 0, which is the fair way to measure", () => {
+      mountHud({ mode: "optimized", refreshSeconds: 0 });
+      cy.contains(".hud-warning", "redraws every").should("not.exist");
+    });
+
+    it("does not warn on a tab with no such setting", () => {
+      mountHud();
+      cy.contains(".hud-warning", "redraws every").should("not.exist");
+    });
+
+    it("saves the interval in the result file", () => {
+      const saved = captureDownload();
+      cy.clock();
+      mountHud({ mode: "optimized", refreshSeconds: 1.5 });
+      cy.get(".record-button").click();
+      tickSeconds(33);
+      cy.then(async () => {
+        const result = JSON.parse(await (saved.blob as Blob).text());
+        expect(result.schema).to.equal(2);
+        expect(result.settings).to.deep.equal({ refreshSeconds: 1.5, changedDuringRun: false });
+      });
+    });
+
+    it("saves null for Naive", () => {
+      const saved = captureDownload();
+      cy.clock();
+      mountHud();
+      cy.get(".record-button").click();
+      tickSeconds(33);
+      cy.then(async () => expect(JSON.parse(await (saved.blob as Blob).text()).settings.refreshSeconds).to.equal(null));
+    });
+
+    it("warns, and marks the file, when the interval is changed during the run", () => {
+      const saved = captureDownload();
+      cy.clock();
+      // The page's refresh box, which edits the interval the panel is told about.
+      function Page() {
+        const [seconds, setSeconds] = useState(1.5);
+        return (
+          <>
+            <button onClick={() => setSeconds(0)}>set to 0</button>
+            <Hud session={makeSession()} mode="optimized" refreshSeconds={seconds} />
+          </>
+        );
+      }
+      cy.mount(withI18n(<Page />));
+      cy.get(".hud").should("exist");
+      cy.get(".record-button").click();
+      tickSeconds(5);
+      cy.contains("button", "set to 0").click();
+      tickSeconds(28);
+      cy.get(".hud-note[role=status]").should("contain.text", "refresh interval was changed");
+      cy.then(async () => {
+        const result = JSON.parse(await (saved.blob as Blob).text());
+        expect(result.settings).to.deep.equal({ refreshSeconds: 1.5, changedDuringRun: true });
+      });
+    });
   });
 
   it("stops its timers when it is removed", () => {

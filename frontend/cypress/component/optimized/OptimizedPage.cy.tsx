@@ -108,6 +108,13 @@ describe("OptimizedPage", () => {
       cy.get("#refresh-hint").should("contain.text", "0 draws every frame");
     });
 
+    it("warns in the performance panel that the default interval flatters a benchmark, until it is set to 0", () => {
+      mountPage();
+      cy.get(".hud-warning").should("contain.text", "redraws every 1.5 s");
+      refreshBox().clear().type("0");
+      cy.contains(".hud-warning", "redraws every").should("not.exist");
+    });
+
     it("holds changes back at the start, because the interval is 1.5 seconds", () => {
       mountPage();
       deliverMarket();

@@ -26,20 +26,32 @@ export interface Recording {
   samples: HudSample[]; // measured seconds only
   latencies: number[]; // every latency from the measured seconds
   tabHidden: boolean; // true if the tab was ever hidden during the run
+  refreshSeconds: number | null; // the grid's redraw interval when the run started; null where there is no such setting
+  refreshChanged: boolean; // true if that interval was changed during the run
 }
 
 /** What the record button shows. `remaining` counts down within the current phase. */
 export type RecordState =
   | { status: "idle" }
   | { status: "recording"; phase: "warmup" | "measuring"; remaining: number }
-  | { status: "done"; fileName: string; tabHidden: boolean };
+  | { status: "done"; fileName: string; tabHidden: boolean; refreshChanged: boolean };
 
 export type RecordingInProgress = Extract<RecordState, { status: "recording" }>;
 
-/** Count one more second of a run: note if the tab was hidden, and keep the sample once warm-up is over. */
-export function advanceRecording(run: Recording, sample: HudSample, latencies: number[], tabHidden: boolean): void {
+/**
+ * Count one more second of a run: note if the tab was hidden or the refresh interval was changed, and keep the
+ * sample once warm-up is over.
+ */
+export function advanceRecording(
+  run: Recording,
+  sample: HudSample,
+  latencies: number[],
+  tabHidden: boolean,
+  refreshSeconds: number | null,
+): void {
   run.tick++;
   if (tabHidden) run.tabHidden = true;
+  if (refreshSeconds !== run.refreshSeconds) run.refreshChanged = true;
   if (run.tick > WARMUP_SECONDS) {
     run.samples.push(sample);
     run.latencies.push(...latencies);
@@ -66,7 +78,7 @@ export function buildResult(rec: Recording, mode: PipelineMode, session: Session
   const sorted = rec.latencies.slice().sort((a, b) => a - b);
   const fps = rec.samples.map((s) => s.fps);
   return {
-    schema: 1,
+    schema: 2, // 2 added `settings`
     recordedAt: new Date().toISOString(),
     mode,
     build: import.meta.env.PROD ? "production" : "development",
@@ -83,6 +95,12 @@ export function buildResult(rec: Recording, mode: PipelineMode, session: Session
       deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
       devicePixelRatio: window.devicePixelRatio,
       viewport: { width: window.innerWidth, height: window.innerHeight },
+    },
+    settings: {
+      // How often the grid redrew, in seconds (0 means every change). A long interval flatters FPS, so a result
+      // is only a fair benchmark at 0. null for the Naive tab, which has no such setting.
+      refreshSeconds: rec.refreshSeconds,
+      changedDuringRun: rec.refreshChanged,
     },
     warmupSeconds: WARMUP_SECONDS,
     durationSeconds: rec.samples.length,

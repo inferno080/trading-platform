@@ -73,7 +73,7 @@ export function OptimizedPage() {
       )}
       {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
 
-      <Hud session={session} mode="optimized" />
+      <Hud session={session} mode="optimized" refreshSeconds={refreshSeconds} />
 
       {ready ? (
         <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} />

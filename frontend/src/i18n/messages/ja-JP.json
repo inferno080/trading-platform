@@ -54,5 +54,7 @@
   "optimized.frozen": "ストリームを停止中です。更新は受信され続け、グリッドは停止した時点の表示のままです。",
   "grid.region": "リアルタイム気配値グリッド",
   "optimized.refresh": "グリッドの更新間隔（秒）",
-  "optimized.refresh.hint": "0で毎フレーム描画します。最大{max, number}秒。"
+  "optimized.refresh.hint": "0で毎フレーム描画します。最大{max, number}秒。",
+  "hud.refreshWarning": "グリッドは{seconds, number}秒ごとに再描画されるため、実際の負荷より数値が良く見えます。公平なベンチマークには更新間隔を0にしてください。",
+  "hud.refreshChangedWarning": "記録中に更新間隔が変更されたため、数値が不正確な可能性があります。"
 }
