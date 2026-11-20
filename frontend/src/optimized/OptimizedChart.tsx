@@ -35,7 +35,7 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
   const hoverX = useRef<number | null>(null);
   const schedule = useRef<() => void>(() => undefined); // draw soon, because the data changed: held to the refresh interval
   const scheduleNow = useRef<() => void>(() => undefined); // draw at the next frame, whatever the interval: for the pointer, a resize, a theme
-  const [ready, setReady] = useState(store.chart?.id === id);
+  const [painted, setPainted] = useState(false); // the skeleton stays until the chart has really been drawn once
 
   useEffect(() => {
     let frame = 0;
@@ -46,13 +46,14 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
       frame = 0;
       const element = canvas.current;
       const context = element?.getContext("2d");
-      const chart = store.chart;
-      if (!element || !context || !chart || chart.id !== id || size.width === 0) return;
-      drawChart(context, chart.data, { ...size, decimals, locale, hoverX: hoverX.current }, readChartColors());
+      const data = store.chart(id);
+      if (!element || !context || !data || size.width === 0) return;
+      drawChart(context, data, { ...size, decimals, locale, hoverX: hoverX.current }, readChartColors());
       drawnAt = performance.now();
+      setPainted(true);
       if (performance.now() - labelledAt > LABEL_EVERY_MS) {
         labelledAt = performance.now();
-        element.setAttribute("aria-label", chartLabel(t, symbol, chart.data, decimals, locale));
+        element.setAttribute("aria-label", chartLabel(t, symbol, data, decimals, locale));
       }
     };
     scheduleNow.current = () => {
@@ -71,8 +72,8 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
         }, Math.max(0, drawnAt + refreshMs - performance.now()));
       }
     };
-    const unsubscribe = store.subscribeChart(() => {
-      setReady(store.chart?.id === id);
+    const unsubscribe = store.subscribeCharts((ids) => {
+      if (!ids.includes(id)) return; // another instrument's chart changed
       if (!frozen) schedule.current(); // frozen: the chart holds still, and catches up when unfrozen (see below)
     });
     scheduleNow.current(); // draw what is already there: after a resize, a theme change, a new language, or unfreezing
@@ -90,7 +91,7 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
         className="chart-canvas"
         role="img"
         aria-label={symbol}
-        data-ready={ready}
+        data-ready={painted}
         onPointerMove={(event) => {
           hoverX.current = event.clientX - event.currentTarget.getBoundingClientRect().left;
           scheduleNow.current(); // the crosshair follows the pointer at once, not at the refresh interval
@@ -100,7 +101,7 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
           scheduleNow.current();
         }}
       />
-      {!ready && !unavailable && (
+      {!painted && !unavailable && (
         <div className="chart-overlay" role="status">
           <span className="visually-hidden">{t("chart.loading")}</span>
           <ChartSkeleton />

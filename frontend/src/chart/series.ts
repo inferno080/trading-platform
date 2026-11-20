@@ -6,6 +6,9 @@
 /** Time between points. The server keeps history at this spacing, and live prices are folded into the same spacing. */
 export const HISTORY_INTERVAL_MS = 1000;
 
+/** The id of the first instrument, AAA, which is the most active one: the chart that is open when a tab loads. */
+export const FIRST_INSTRUMENT = 0;
+
 /** How many points a chart holds: the last five minutes. */
 export const HISTORY_CAPACITY = 300;
 

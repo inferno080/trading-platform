@@ -21,8 +21,8 @@ export interface FeedWorkerState {
   badVersion: number | null;
   /** True once the first snapshot has arrived. */
   hasSnapshot: boolean;
-  /** The instrument the server has no price history for, when the chart asked for one. */
-  chartUnavailable: number | null;
+  /** The instruments the server has no price history for. */
+  chartUnavailable: number[];
 }
 
 export const initialFeedState: FeedWorkerState = {
@@ -33,7 +33,7 @@ export const initialFeedState: FeedWorkerState = {
   referenceMissing: false,
   badVersion: null,
   hasSnapshot: false,
-  chartUnavailable: null,
+  chartUnavailable: [],
 };
 
 /**
@@ -59,9 +59,11 @@ export function reduceWorkerEvent(state: FeedWorkerState, event: WorkerEvent): F
     case "batch":
       return state;
     case "chartUnavailable":
-      return { ...state, chartUnavailable: event.id };
+      return state.chartUnavailable.includes(event.id) ? state : { ...state, chartUnavailable: [...state.chartUnavailable, event.id] };
   }
 }
+
+const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
 
 /** How often rows that have gone quiet are marked as stale. */
 const STALE_SWEEP_MS = 1_000;
@@ -84,12 +86,13 @@ export const RESUME_GRACE_MS = 1_000;
  * request outstanding. The pace is therefore set by the page: if drawing is slow, frames are late, requests are
  * late, and the worker simply conflates more.
  */
-export function useFeedWorker(selectedId: number | null = null): { state: FeedWorkerState; store: FeedStore } {
+export function useFeedWorker(selectedId: number | null = null, watchlist: number[] = NO_IDS): { state: FeedWorkerState; store: FeedStore } {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
   const [store] = useState(() => new FeedStore());
   const worker = useRef<WorkerLike | null>(null);
   const selected = useRef(selectedId); // what a worker started later should be told
+  const watched = useRef(watchlist);
 
   useEffect(() => {
     collector.reset(); // start clean: counters from a previously active tab must not leak in
@@ -107,12 +110,13 @@ export function useFeedWorker(selectedId: number | null = null): { state: FeedWo
         pullOutstanding = false;
         collector.onBatch(message.stats);
         store.applyBatch(message.updates, Date.now());
-        if (message.chart) store.setChart(message.chart);
+        if (message.charts) store.setCharts(message.charts);
       }
       setState((previous) => reduceWorkerEvent(previous, message));
     };
     connection.postMessage({ type: "connect", url: WS_URL });
     if (selected.current !== null) connection.postMessage({ type: "select", id: selected.current });
+    if (watched.current.length > 0) connection.postMessage({ type: "watch", ids: watched.current });
 
     let frame = requestAnimationFrame(function onFrame() {
       const now = Date.now();
@@ -145,12 +149,19 @@ export function useFeedWorker(selectedId: number | null = null): { state: FeedWo
     };
   }, [createWorker, store]);
 
-  // Choosing another instrument (or none) starts a fresh chart: the old one is dropped and the worker is told.
+  // Tell the worker which instrument's chart is open and which are on the watchlist, and drop the charts of any that no
+  // longer are, so one that comes back starts from its skeleton again.
   useEffect(() => {
     selected.current = selectedId;
-    store.setChart(null);
     worker.current?.postMessage({ type: "select", id: selectedId });
-  }, [selectedId, store]);
+  }, [selectedId]);
+  useEffect(() => {
+    watched.current = watchlist;
+    worker.current?.postMessage({ type: "watch", ids: watchlist });
+  }, [watchlist]);
+  useEffect(() => {
+    store.keepCharts(new Set([...watchlist, ...(selectedId === null ? [] : [selectedId])]));
+  }, [store, selectedId, watchlist]);
 
   return { state, store };
 }

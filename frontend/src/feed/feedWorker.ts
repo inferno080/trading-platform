@@ -26,6 +26,7 @@ scope.onmessage = (event) => {
   const command = event.data;
   if (command.type === "connect") connection.connect(command.url);
   else if (command.type === "select") connection.select(command.id);
+  else if (command.type === "watch") connection.watch(command.ids);
   else connection.pull();
 };
 

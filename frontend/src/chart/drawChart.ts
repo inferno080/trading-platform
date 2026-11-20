@@ -7,6 +7,8 @@ export interface ChartColors {
   text: string;
   muted: string;
   background: string;
+  up: string;
+  down: string;
 }
 
 export interface ChartView {
@@ -33,6 +35,8 @@ export function readChartColors(): ChartColors {
     text: token("--color-text"),
     muted: token("--color-text-muted"),
     background: token("--color-bg"),
+    up: token("--color-up"),
+    down: token("--color-down"),
   };
 }
 

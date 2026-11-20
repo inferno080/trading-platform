@@ -16,7 +16,7 @@ export interface FeedStats {
   latencies: number[]; // ms from the server's send time to arrival in the worker, one per delta frame
 }
 
-/** The price chart of the selected instrument: the flat [time, price, ...] list, all of it, replacing what the page had. */
+/** The price chart of one tracked instrument (the open one, or one on the watchlist): the flat [time, price, ...] list, all of it, replacing what the page had. */
 export interface ChartUpdate {
   id: number;
   data: Float64Array;
@@ -26,7 +26,8 @@ export interface ChartUpdate {
 export type WorkerCommand =
   | { type: "connect"; url: string }
   | { type: "pull" } // "send me what changed since the last pull": the page asks once per animation frame
-  | { type: "select"; id: number | null }; // the instrument whose price chart the page shows (null: none)
+  | { type: "select"; id: number | null } // the instrument whose price chart the page shows (null: none)
+  | { type: "watch"; ids: number[] }; // the instruments on the watchlist: each is subscribed to and has a chart kept up to date
 
 /** From the worker to the page. */
 export type WorkerEvent =
@@ -37,5 +38,5 @@ export type WorkerEvent =
   | { type: "reference"; instruments: InstrumentReference[] } // the reference data arrived
   | { type: "referenceTimeout" } // the reference data has not arrived in time
   | { type: "snapshot"; quotes: Quote[] } // the full state, sent on connect and again after a gap
-  | { type: "batch"; updates: Quote[]; stats: FeedStats; chart?: ChartUpdate } // the latest state of every instrument that changed since the last pull, and the selected instrument's chart if it changed
-  | { type: "chartUnavailable"; id: number }; // the server has no price history for the selected instrument
+  | { type: "batch"; updates: Quote[]; stats: FeedStats; charts?: ChartUpdate[] } // the latest state of every instrument that changed since the last pull, and every tracked chart that changed
+  | { type: "chartUnavailable"; id: number }; // the server has no price history for a tracked instrument

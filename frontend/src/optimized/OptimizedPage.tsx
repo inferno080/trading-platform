@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { SymbolDetail } from "../chart/SymbolDetail";
-import { TableSkeleton } from "../components/skeletons";
+import { MiniChartLoading, SymbolDetailSkeleton, TableSkeleton } from "../components/skeletons";
 import { Hud } from "../hud/Hud";
 import { useT } from "../i18n/useT";
 import { PROTOCOL_VERSION } from "../protocol/messages";
+import { Toast } from "../watchlist/Toast";
+import { useWatchlist } from "../watchlist/useWatchlist";
+import { WatchlistPanel, type WatchlistItem } from "../watchlist/WatchlistPanel";
+import { WatchlistToggle } from "../watchlist/WatchlistToggle";
+import { Workspace } from "../watchlist/Workspace";
 import type { FeedStore } from "./feedStore";
+import { FIRST_INSTRUMENT } from "../chart/series";
 import { OptimizedChart } from "./OptimizedChart";
+import { OptimizedMiniChart } from "./OptimizedMiniChart";
 import { QuotesGrid } from "./QuotesGrid";
 import { DEFAULT_REFRESH_SECONDS, MAX_REFRESH_SECONDS, parseRefreshSeconds } from "./refresh";
 import { useFeedWorker } from "./useFeedWorker";
@@ -43,22 +50,31 @@ function RefreshControl({ seconds, onChange }: { seconds: number; onChange: (sec
   );
 }
 
-/** The panel with the price chart of one instrument, once the page knows its symbol and reference data. */
-function SelectedChart({
-  store,
-  id,
-  unavailable,
-  refreshMs,
-  frozen,
-  onClose,
-}: {
+interface Display {
   store: FeedStore;
-  id: number;
-  unavailable: boolean;
   refreshMs: number;
   frozen: boolean;
+}
+
+/** The panel with the price chart of one instrument, once the page knows its symbol and reference data. */
+function SelectedChart({
+  display,
+  id,
+  unavailable,
+  inWatchlist,
+  onToggleWatchlist,
+  onClose,
+  takeFocus,
+}: {
+  display: Display;
+  id: number;
+  unavailable: boolean;
+  inWatchlist: boolean;
+  onToggleWatchlist: () => void;
   onClose: () => void;
+  takeFocus: boolean;
 }) {
+  const { store, refreshMs, frozen } = display;
   const row = store.row(id);
   const instrument = store.instrument(id);
   if (!row || !instrument) return null;
@@ -69,7 +85,10 @@ function SelectedChart({
       currency={instrument.currency}
       tickSize={instrument.tickSize}
       decimals={instrument.decimals}
+      inWatchlist={inWatchlist}
+      onToggleWatchlist={onToggleWatchlist}
       onClose={onClose}
+      takeFocus={takeFocus}
     >
       <OptimizedChart
         key={id}
@@ -85,6 +104,27 @@ function SelectedChart({
   );
 }
 
+/** The watchlist panel: a mini chart for each symbol on it, drawn from the store. */
+function Watchlist({ display, ids, onOpen, onRemove }: { display: Display; ids: number[]; onOpen: (id: number) => void; onRemove: (id: number) => void }) {
+  const { store, refreshMs, frozen } = display;
+  const items: WatchlistItem[] = ids.map((id) => {
+    const row = store.row(id);
+    const instrument = store.instrument(id);
+    return {
+      id,
+      symbol: row?.sym ?? `#${id}`,
+      name: instrument?.name ?? "",
+      chart:
+        row && instrument ? (
+          <OptimizedMiniChart store={store} id={id} symbol={row.sym} decimals={instrument.decimals} refreshMs={refreshMs} frozen={frozen} />
+        ) : (
+          <MiniChartLoading />
+        ),
+    };
+  });
+  return <WatchlistPanel items={items} onOpen={onOpen} onRemove={onRemove} />;
+}
+
 /**
  * The optimized iteration: a Web Worker owns the connection and conflates updates, the page pulls them once per
  * animation frame into a store, and AG Grid draws only the rows on screen, at a rate a person can read.
@@ -93,10 +133,18 @@ export function OptimizedPage() {
   const t = useT();
   const [frozen, setFrozen] = useState(false);
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_REFRESH_SECONDS);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const { state, store } = useFeedWorker(selectedId);
+  // The chart of the first instrument (AAA, the most active) is open from the start; `userChose` is false until the person picks one.
+  const [selectedId, setSelectedId] = useState<number | null>(FIRST_INSTRUMENT);
+  const [userChose, setUserChose] = useState(false);
+  const choose = (id: number | null) => {
+    setUserChose(true);
+    setSelectedId(id);
+  };
+  const watchlist = useWatchlist();
+  const { state, store } = useFeedWorker(selectedId, watchlist.ids);
   const { status, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
+  const display: Display = { store, refreshMs: refreshSeconds * 1000, frozen };
 
   return (
     // The scope name proves, to the tests, that the connection runs in a worker and not in the page.
@@ -110,6 +158,7 @@ export function OptimizedPage() {
         <button type="button" className="toggle-button" aria-pressed={frozen} onClick={() => setFrozen((f) => !f)}>
           {t("optimized.freeze")}
         </button>
+        <WatchlistToggle count={watchlist.ids.length} open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
         <span className="frozen-note" role="status">
           {frozen && t("optimized.frozen")}
         </span>
@@ -121,25 +170,31 @@ export function OptimizedPage() {
 
       <Hud session={session} mode="optimized" refreshSeconds={refreshSeconds} />
 
+      {selectedId !== null && !ready && <SymbolDetailSkeleton />}
       {ready && selectedId !== null && (
         <SelectedChart
-          store={store}
+          display={display}
           id={selectedId}
-          unavailable={state.chartUnavailable === selectedId}
-          refreshMs={refreshSeconds * 1000}
-          frozen={frozen}
-          onClose={() => setSelectedId(null)}
+          unavailable={state.chartUnavailable.includes(selectedId)}
+          inWatchlist={watchlist.ids.includes(selectedId)}
+          onToggleWatchlist={() => watchlist.toggle(selectedId)}
+          onClose={() => choose(null)}
+          takeFocus={userChose}
         />
       )}
 
-      {ready ? (
-        <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={setSelectedId} />
-      ) : (
-        <div role="status">
-          <span className="visually-hidden">{t("table.waiting")}</span>
-          <TableSkeleton />
-        </div>
-      )}
+      {/* The same layout from the first moment: the quotes (or their skeleton) and the watchlist beside them. */}
+      <Workspace open={watchlist.open} panel={<Watchlist display={display} ids={watchlist.ids} onOpen={choose} onRemove={watchlist.remove} />}>
+        {ready ? (
+          <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={choose} />
+        ) : (
+          <div role="status">
+            <span className="visually-hidden">{t("table.waiting")}</span>
+            <TableSkeleton />
+          </div>
+        )}
+      </Workspace>
+      <Toast toast={watchlist.toast} onDismiss={watchlist.dismissToast} />
     </section>
   );
 }

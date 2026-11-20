@@ -61,5 +61,15 @@
   "chart.close": "Close chart",
   "chart.loading": "Loading price history",
   "chart.unavailable": "Price history is not available for this instrument.",
-  "chart.summary": "{symbol} price over the last {minutes, number} minutes: last {last}, high {high}, low {low}."
+  "chart.summary": "{symbol} price over the last {minutes, number} minutes: last {last}, high {high}, low {low}.",
+  "watchlist.title": "Watchlist",
+  "watchlist.size": "{count, number} of {limit, number}",
+  "watchlist.toggle": "Watchlist ({count, number})",
+  "watchlist.add": "Add to watchlist",
+  "watchlist.remove": "Remove from watchlist",
+  "watchlist.removeItem": "Remove {symbol} from the watchlist",
+  "watchlist.open": "Open the {symbol} chart",
+  "watchlist.empty": "Nothing here yet. Open a symbol's chart and choose Add to watchlist.",
+  "watchlist.full": "The watchlist is full ({limit, number} symbols). Remove one to add another.",
+  "watchlist.dismiss": "Dismiss"
 }

@@ -194,6 +194,7 @@ frontend/src/
   shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
   feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
   chart/         the price chart shared by both tabs: data helpers, canvas drawing, the detail panel
+  watchlist/     the watchlist panel, its saved state, the toast and the 70/30 layout
   optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
   naive/         the baseline: WebSocket straight into React state, plain table of all rows
   hud/           performance HUD, metrics collector, and the run recorder
@@ -228,6 +229,10 @@ What you see and can change:
 | Drawing | An effect that redraws on every state change, on the page's thread | At most one drawing pass per animation frame, read from the store, with no React render |
 
 The chart has price and time axes (prices in the instrument's own decimals), a crosshair with a time and price label on hover, a shimmering skeleton while the history loads, and a sentence for assistive technology (last, high and low over the period). It follows the theme and the language.
+
+**Watchlist.** On the right (30% of the width; the quotes take the other 70%) is a collapsible watchlist, shown or hidden with the **Watchlist** button in the toolbar. When it is collapsed the quotes use the full width. From an open chart, **Add to watchlist** puts the symbol on it (and the button becomes **Remove from watchlist**); a fifth symbol is refused with a toast ("The watchlist is full (4 symbols)…"). Each entry has a mini chart with its latest price and how far it moved over the period (an arrow as well as a color), a button that opens its full chart, and a remove button. The list is saved in the browser, so it survives a reload and is shared by both tabs. Everything is reachable by keyboard: the toggle, the add and remove buttons, each entry's buttons, and the toast's Dismiss button; after removing an entry, focus moves to the watchlist heading. The toast does not take focus, is announced politely by screen readers, and stays while the pointer or focus is on it.
+
+Each symbol on the watchlist is a **subscription** on the server (the limit of 4 leaves one of the server's 5 per client for later), and removing it unsubscribes. Both tabs keep a chart for every symbol on the watchlist and the open one, built the same way as the big chart: the Naive tab in React state, copied and set on every update; the Optimized tab in the worker, drawn from the store at the refresh interval (and held still by Freeze).
 
 The first iteration built, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
 

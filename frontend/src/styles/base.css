@@ -308,10 +308,10 @@ main:focus {
 }
 
 /* Quotes grid (AG Grid takes its colors from the design tokens; see QuotesGrid.tsx) */
-/* The Naive table and the Optimized grid are the same size: 70% of the width of the HUD (which is the full width of the
-   page), and the same height. On a narrow screen they take the full width, because 70% of it would be too small to read. */
+/* The Naive table and the Optimized grid are the same size: they fill their column of the workspace (70% of the width of
+   the HUD, or all of it when the watchlist is collapsed), at the same height. */
 .grid-wrap {
-  width: 70%;
+  width: 100%;
   height: min(70vh, 760px);
   min-height: 360px;
 }
@@ -353,7 +353,7 @@ main:focus {
 
 /* Quotes table */
 .table-wrap {
-  width: 70%; /* see .grid-wrap */
+  width: 100%; /* see .grid-wrap */
   max-height: min(70vh, 760px);
   overflow: auto;
   border: 1px solid var(--color-border);
@@ -397,6 +397,15 @@ td:first-child,
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Skeletons are drawn in tokens made for the plain page background. The chart panels and the watchlist sit on a
+   different (surface) color, where those would nearly vanish, so inside them the placeholder is a mix of the text
+   color, which stays visible in every theme. */
+.symbol-detail,
+.watchlist {
+  --skeleton-base: color-mix(in srgb, var(--color-text) 16%, var(--color-surface));
+  --skeleton-highlight: color-mix(in srgb, var(--color-text) 30%, var(--color-surface));
 }
 
 /* Symbol detail panel and its price chart (shared by both tabs) */
@@ -482,9 +491,123 @@ tbody tr {
   cursor: pointer;
 }
 
+/* Workspace: the quotes (70%) and the watchlist (30%) side by side; collapsed, the quotes take it all. On a narrow screen
+   the watchlist goes below the quotes, because 30% of it would be too small to use. */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.workspace[data-watchlist="closed"] {
+  grid-template-columns: minmax(0, 1fr);
+}
 @media (max-width: 900px) {
-  .grid-wrap,
-  .table-wrap {
-    width: 100%;
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
   }
+}
+.workspace-main {
+  min-width: 0;
+}
+
+.watchlist {
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.watchlist h2 {
+  margin: 0 0 var(--space-3);
+  font-size: 1rem;
+}
+.watchlist-count {
+  margin-inline-start: var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.watchlist-empty {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+.watchlist-items {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.watch-item {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.watch-item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2); /* a little room between the symbol row and the price and chart below it */
+}
+.watch-open {
+  font-weight: 600;
+}
+.watch-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.watch-remove {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 var(--space-1);
+}
+.mini-caption {
+  display: block;
+  min-height: 1.25em;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+.mini-caption[data-direction="1"] {
+  color: var(--color-up);
+}
+.mini-caption[data-direction="-1"] {
+  color: var(--color-down);
+}
+.mini-area {
+  position: relative;
+  height: 56px;
+}
+.mini-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.mini-canvas[data-ready="false"] {
+  visibility: hidden;
+}
+
+/* A short message at the bottom of the screen (see watchlist/Toast.tsx). */
+.toast-region {
+  position: fixed;
+  inset-inline-end: var(--space-4);
+  inset-block-end: var(--space-4);
+  z-index: 50;
+  max-width: min(420px, calc(100vw - 2 * var(--space-4)));
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
 }

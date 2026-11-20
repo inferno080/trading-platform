@@ -20,8 +20,10 @@ export function useCanvasSize(canvas: RefObject<HTMLCanvasElement | null>): Canv
     const update = () => {
       const dpr = window.devicePixelRatio || 1;
       const { clientWidth: width, clientHeight: height } = element;
-      element.width = Math.round(width * dpr);
-      element.height = Math.round(height * dpr);
+      // Assigning a canvas's size clears it, even to the same value, so only touch it when the size really changed. A
+      // page that is resized for another reason (a scrollbar appearing, say) must not wipe a chart that was drawn.
+      if (element.width !== Math.round(width * dpr)) element.width = Math.round(width * dpr);
+      if (element.height !== Math.round(height * dpr)) element.height = Math.round(height * dpr);
       setSize((previous) => (previous.width === width && previous.height === height && previous.dpr === dpr ? previous : { width, height, dpr }));
     };
     update();

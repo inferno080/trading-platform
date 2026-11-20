@@ -31,31 +31,35 @@ export const applyUpdates = (quotes: Quote[], updates: QuoteUpdate[]): Quote[] =
   return next;
 };
 
-type ChartState = { id: number; data: number[] } | null;
+/** The price charts of the tracked instruments (the open one and the watchlist's), by instrument id. */
+export type Charts = Record<number, number[]>;
 
-/** Naive: every update of the selected instrument copies its whole chart and sets state again. */
-function foldTicks(setChart: (update: (previous: ChartState) => ChartState) => void, selected: number | null, updates: QuoteUpdate[]): void {
+const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
+
+/** Naive: every update of a tracked instrument copies its whole chart (and the lot of them) and sets state again. */
+function foldTicks(setCharts: (update: (previous: Charts) => Charts) => void, tracked: ReadonlySet<number>, updates: QuoteUpdate[]): void {
   for (const update of updates) {
-    if (update.id !== selected) continue;
-    setChart((previous) => {
-      if (!previous || previous.id !== update.id) return previous;
-      const data = previous.data.slice();
+    if (!tracked.has(update.id)) continue;
+    setCharts((previous) => {
+      const current = previous[update.id];
+      if (!current) return previous; // its history has not arrived yet
+      const data = current.slice();
       appendTick(data, update.ts, update.last);
-      return { id: previous.id, data };
+      return { ...previous, [update.id]: data };
     });
   }
 }
 
-/** The server's answer to a request for the selected instrument's history: the data, or a refusal. */
+/** The server's answer to a request for a tracked instrument's history: the data, or a refusal. */
 function applyChartReply(
   msg: HistoryData | Rejected,
-  selected: number | null,
-  setChart: (chart: ChartState) => void,
-  setUnavailable: (unavailable: boolean) => void,
+  tracked: ReadonlySet<number>,
+  setCharts: (update: (previous: Charts) => Charts) => void,
+  setUnavailable: (update: (previous: number[]) => number[]) => void,
 ): void {
-  if (msg.id !== selected) return; // an answer for an instrument that is no longer selected
-  if (msg.t === "history") setChart({ id: msg.id, data: flatten(msg.points) });
-  else if (msg.request === "history") setUnavailable(true);
+  if (!tracked.has(msg.id)) return; // an answer for an instrument that is no longer tracked
+  if (msg.t === "history") setCharts((previous) => ({ ...previous, [msg.id]: flatten(msg.points) }));
+  else if (msg.request === "history") setUnavailable((previous) => (previous.includes(msg.id) ? previous : [...previous, msg.id]));
 }
 
 /**
@@ -66,28 +70,57 @@ function applyChartReply(
  * Once per connection, right after the session, it asks the server for the reference data (names, currencies,
  * decimals and previous closes). That data is static, so it is kept apart from the quotes that change every frame.
  */
-export function useNaiveFeed(selectedId: number | null = null) {
+export function useNaiveFeed(selectedId: number | null = null, watchlist: number[] = NO_IDS) {
   const [status, setStatus] = useState<FeedStatus>("connecting");
   const [session, setSession] = useState<Session | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [reference, setReference] = useState<ReferenceById | null>(null);
   const [referenceMissing, setReferenceMissing] = useState(false);
   const [badVersion, setBadVersion] = useState<number | null>(null);
-  // The price chart of the selected instrument, as the flat [time, price, ...] list, and whether it could not be had.
-  const [chart, setChart] = useState<ChartState>(null);
-  const [chartUnavailable, setChartUnavailable] = useState(false);
+  // The price charts of the tracked instruments, and the ones the server has no history for.
+  const [charts, setCharts] = useState<Charts>({});
+  const [chartUnavailable, setChartUnavailable] = useState<number[]>([]);
   const socket = useRef<WebSocket | null>(null);
-  const selected = useRef(selectedId); // read by the socket's handlers, which are set up once
+  const tracked = useRef<ReadonlySet<number>>(new Set()); // read by the socket's handlers, which are set up once
+  const requested = useRef(new Set<number>()); // histories asked for on this connection
+  const subscribed = useRef(new Set<number>()); // watchlist subscriptions made on this connection
+  const sync = useRef<() => void>(() => undefined);
 
-  // A newly selected instrument starts with no chart, and its history is asked for (once connected).
+  // Make what the server knows match what the page wants: history for each tracked instrument, subscriptions for the
+  // watchlist, and nothing kept for instruments that are no longer tracked. Runs when the choice changes, and again
+  // whenever the connection opens.
   useEffect(() => {
-    selected.current = selectedId;
-    setChart(null);
-    setChartUnavailable(false);
-    if (selectedId !== null && socket.current?.readyState === WebSocket.OPEN) {
-      socket.current.send(encodeClientMessage({ t: "history", id: selectedId }));
-    }
-  }, [selectedId]);
+    sync.current = () => {
+      const wanted = new Set(watchlist);
+      if (selectedId !== null) wanted.add(selectedId);
+      tracked.current = wanted;
+      for (const id of [...requested.current]) if (!wanted.has(id)) requested.current.delete(id);
+      setCharts((previous) => {
+        const kept = Object.keys(previous).filter((id) => wanted.has(Number(id)));
+        return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept.map((id) => [id, previous[Number(id)]!]));
+      });
+      setChartUnavailable((previous) => (previous.every((id) => wanted.has(id)) ? previous : previous.filter((id) => wanted.has(id))));
+
+      const ws = socket.current;
+      if (ws?.readyState !== WebSocket.OPEN) return;
+      for (const id of wanted) {
+        if (requested.current.has(id)) continue;
+        requested.current.add(id);
+        ws.send(encodeClientMessage({ t: "history", id }));
+      }
+      for (const id of [...subscribed.current]) {
+        if (watchlist.includes(id)) continue;
+        subscribed.current.delete(id);
+        ws.send(encodeClientMessage({ t: "unsubscribe", id }));
+      }
+      for (const id of watchlist) {
+        if (subscribed.current.has(id)) continue;
+        subscribed.current.add(id);
+        ws.send(encodeClientMessage({ t: "subscribe", id }));
+      }
+    };
+    sync.current();
+  }, [selectedId, watchlist]);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -98,7 +131,9 @@ export function useNaiveFeed(selectedId: number | null = null) {
 
     ws.onopen = () => {
       setStatus("live");
-      if (selected.current !== null) ws.send(encodeClientMessage({ t: "history", id: selected.current }));
+      requested.current.clear(); // a new connection knows nothing of what was asked before
+      subscribed.current.clear();
+      sync.current();
     };
     ws.onclose = () => setStatus((s) => (s === "error" ? s : "closed"));
     ws.onerror = () => setStatus("error");
@@ -144,12 +179,12 @@ export function useNaiveFeed(selectedId: number | null = null) {
           lastSeq = msg.seq;
           collector.onDelta(msg.updates.length, Date.now() - msg.ts);
           setQuotes((previous) => applyUpdates(previous, msg.updates));
-          foldTicks(setChart, selected.current, msg.updates);
+          foldTicks(setCharts, tracked.current, msg.updates);
           break;
 
         case "history":
         case "rejected":
-          applyChartReply(msg, selected.current, setChart, setChartUnavailable);
+          applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
           break;
       }
     };
@@ -161,5 +196,5 @@ export function useNaiveFeed(selectedId: number | null = null) {
     };
   }, []);
 
-  return { status, session, quotes, reference, referenceMissing, badVersion, chart, chartUnavailable };
+  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable };
 }
