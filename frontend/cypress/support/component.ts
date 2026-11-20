@@ -3,6 +3,7 @@ import { mount } from "cypress/react";
 import "cypress-real-events";
 import "../../src/styles/tokens.css";
 import "../../src/styles/base.css";
+import { FakeWorker } from "./fakeWorker";
 import { restoreWebSocket } from "./fakeWebSocket";
 import { installMatchMedia, restoreMatchMedia } from "./matchMedia";
 import { restoreLocalStorage } from "./storage";
@@ -27,6 +28,7 @@ beforeEach(() => {
   document.documentElement.lang = "en-US";
   window.location.hash = "";
   installMatchMedia();
+  FakeWorker.instances.length = 0;
 });
 
 afterEach(() => {

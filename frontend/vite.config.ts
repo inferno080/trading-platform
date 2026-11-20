@@ -22,10 +22,11 @@ export default defineConfig({
     // so normal dev and production builds are never instrumented.
     istanbul({
       include: ["src/**"],
-      exclude: ["src/main.tsx"],
+      exclude: ["src/main.tsx", "src/feed/feedWorker.ts"], // neither can report coverage: one is the entry point, one runs in a worker
       extension: [".ts", ".tsx"],
       requireEnv: true,
     }),
   ],
   define: { __GIT_COMMIT__: JSON.stringify(commit) },
+  worker: { format: "es" }, // Web Workers are built as modules, matching `new Worker(..., { type: "module" })`
 });

@@ -1,11 +1,12 @@
 /**
  * Wire types, mirrored from backend/src/protocol/messages.ts.
  * Keep the two files in sync by hand until the project shares a types package.
- * Prices are fixed-point integers: real price = wire value / Session.pxScale.
+ * Prices are fixed-point integers in each instrument's own scale: real price = wire value / 10^decimals, where
+ * `decimals` comes from that instrument's reference data (ask for it with { t: "reference" }).
  */
 
-/** The protocol version this client understands. */
-export const PROTOCOL_VERSION = 1;
+/** The protocol version this client understands. Version 2 scales prices per instrument. */
+export const PROTOCOL_VERSION = 2;
 
 /** Session handshake, sent once per connection before the first snapshot. */
 export interface Session {
@@ -13,7 +14,6 @@ export interface Session {
   v: number; // protocol version
   serverTime: number; // epoch ms at send
   instruments: number;
-  pxScale: number; // divide wire prices by this to get real prices
   tickMs: number; // how often a delta frame is sent
   updatesPerSecond: number; // target update rate across all instruments
 }
@@ -48,10 +48,34 @@ export interface Delta {
   updates: QuoteUpdate[];
 }
 
-export type ServerMessage = Session | Snapshot | Delta;
+/**
+ * Static facts about one instrument. A price on the wire is an integer counting units of 10^-decimals of the
+ * instrument's currency, so real price = wire value / 10^decimals.
+ */
+export interface InstrumentReference {
+  id: number;
+  name: string;
+  currency: string; // ISO code, e.g. "USD"
+  tickSize: number; // real price units, e.g. 0.01
+  decimals: number; // decimal places of a price, e.g. 2
+  prevClose: number; // previous close, as a wire integer (divide by 10^decimals for the real price)
+}
+
+/** Reference data for every instrument. Sent only in reply to a ReferenceRequest. */
+export interface ReferenceData {
+  t: "reference";
+  instruments: InstrumentReference[];
+}
+
+export type ServerMessage = Session | Snapshot | Delta | ReferenceData;
 
 export interface ResyncRequest {
   t: "resync";
 }
 
-export type ClientMessage = ResyncRequest;
+/** Asks for the reference data. The server replies only to the client that asked. */
+export interface ReferenceRequest {
+  t: "reference";
+}
+
+export type ClientMessage = ResyncRequest | ReferenceRequest;

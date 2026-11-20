@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface ErrorBoundaryProps {
   fallback: ReactNode;
@@ -11,6 +11,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, { failed: boole
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  // The fallback hides what went wrong from the user, so say it in the console for whoever is debugging.
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("A view failed to render:", error, info.componentStack);
   }
 
   render() {

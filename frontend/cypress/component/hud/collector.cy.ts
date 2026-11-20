@@ -23,6 +23,13 @@ describe("collector", () => {
     expect(collector.drain()).to.deep.equal({ messages: 2, updates: 15, latencies: [5, 9], gaps: 0 });
   });
 
+  it("adds up a worker's batch counters", () => {
+    collector.onBatch({ messages: 2, updatesIn: 15, gaps: 1, latencies: [5, 9] });
+    collector.onBatch({ messages: 1, updatesIn: 3, gaps: 0, latencies: [7] });
+    expect(collector.drain()).to.deep.equal({ messages: 3, updates: 18, latencies: [5, 9, 7], gaps: 1 });
+    expect(collector.totalGaps).to.equal(1);
+  });
+
   it("starts a fresh window after draining", () => {
     collector.onDelta(10, 5);
     collector.drain();

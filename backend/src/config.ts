@@ -15,4 +15,10 @@ export const config = {
   /** If a client's socket buffer exceeds this, we drop deltas for it and it must resync. */
   maxBufferedBytes: num("MAX_BUFFERED_BYTES", 4 * 1024 * 1024),
   seed: num("SEED", 42),
+  /**
+   * How unevenly updates are spread over the instruments (Zipf exponent). Instrument 0 is the most active,
+   * and the instrument at rank r gets weight 1 / r^skew. 0 = every instrument equally active; 1 = a few hot
+   * instruments produce most of the updates, like a real market.
+   */
+  activitySkew: num("ACTIVITY_SKEW", 1),
 } as const;

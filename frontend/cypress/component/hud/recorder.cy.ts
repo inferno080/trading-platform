@@ -57,7 +57,7 @@ describe("buildResult", () => {
     const result = buildResult(twoSeconds, "optimized", makeSession());
     expect(result.schema).to.equal(1);
     expect(result.mode).to.equal("optimized");
-    expect(result.load).to.deep.equal({ instruments: 3, updatesPerSecond: 50_000, tickMs: 20, protocolVersion: 1 });
+    expect(result.load).to.deep.equal({ instruments: 3, updatesPerSecond: 50_000, tickMs: 20, protocolVersion: 2 });
   });
 
   it("records the load as null when there was no session", () => {
