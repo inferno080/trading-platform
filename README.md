@@ -113,7 +113,7 @@ The grid shows one best bid and ask per instrument (level 1). A detail view need
 | `trades` | `{ id, trades: [{ ts, price, size, side }] }`: the trades since the last frame, oldest first. `side` is `"buy"` at the ask or `"sell"` at the bid. | A stream: only sent when there were trades. About a fifth of updates are a trade, which is what moves `last` and `vol` |
 | `history` | Recent `last` prices, oldest first | One reply to a request, not a stream |
 
-Prices are wire integers in the instrument's own scale, like quotes. The rungs below the top of the book are made up, but only from the instrument, the rung and the quote's time, so a ladder keeps its shape until the instrument next updates and the same quote always gives the same ladder. Depth and history never use the simulator's random generator for live prices, so subscribing does not change the market. The past points of the history are generated at start-up as a random walk that ends at the current price (with its own generator), and from then on one real point is added per interval.
+Prices are wire integers in the instrument's own scale, like quotes. The rungs below the top of the book are made up, but only from the instrument, the rung and the quote's time, so a ladder keeps its shape until the instrument next updates and the same quote always gives the same ladder. Depth and history never use the simulator's random generator for live prices, so subscribing does not change the market. The past points of the history are generated at start-up as a random walk that ends at the current price (with its own generator), and from then on one real point is added per interval. The walk is as lively as that instrument's live prices: each update moves a price by about 2 ticks, so over a second it wanders about 2 × √(updates per second) ticks. With the defaults, the busiest symbol (`AAA`) ranges over roughly 13% in the 5 minutes, a mid-table one a few percent, and a quiet one under 1%.
 
 The depth and trades of a tick travel with that tick's delta: the `latency` chaos command holds them back with it, a `gap` loses them with it, and `pause` stops them. A client that is not keeping up simply misses some, which does no harm, since the next ladder replaces the last one.
 
@@ -130,7 +130,7 @@ The simulator has four groups of instruments, so the feed has to deal with diffe
 | JPY equities | 20% | JPY | 0 | 1 | 500 to 50,000 |
 | FX-style | 10% | USD | 4 | 0.0001 | 0.5 to 2 |
 
-Every price sits on a multiple of its tick, and the spread between bid and ask never changes. A client asks for the static facts about every instrument with a `reference` message and gets one entry each:
+Every price sits on a multiple of its tick. The spread between bid and ask starts at 2 to 8 ticks and then moves: about 15% of updates widen or narrow it by one tick (by moving the bid or the ask), staying between 2 and 12 ticks. A client asks for the static facts about every instrument with a `reference` message and gets one entry each:
 
 | Field | Meaning |
 | --- | --- |
@@ -193,6 +193,7 @@ frontend/src/
   iterations.ts  registry of frontend iterations, one entry per tab
   shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
   feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
+  chart/         the price chart shared by both tabs: data helpers, canvas drawing, the detail panel
   optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
   naive/         the baseline: WebSocket straight into React state, plain table of all rows
   hud/           performance HUD, metrics collector, and the run recorder
@@ -212,16 +213,25 @@ The **Optimized** iteration moves the work off the page, in four stages:
 
 What you see and can change:
 
-- **Refresh every (seconds)**, a number box that starts at **1.5**. The grid collects the changes and redraws them all together once per interval, showing the latest state of each row; **0** redraws every change as it arrives. The data still arrives and is counted at full speed. One shared redraw means everything that changed flashes in the same instant, which is more noticeable at long intervals; a short interval hides it.
+- **Refresh every (seconds)**, a number box that starts at **1.5** and sets how often **everything on screen** refreshes: the quotes and the price chart. They collect the changes (keeping the latest state of each row, and of the chart) and redraw together once per interval; **0** redraws every change as it arrives. Hovering the chart still moves its crosshair at once. The data still arrives and is counted at full speed. One shared redraw means everything that changed flashes in the same instant, which is more noticeable at long intervals; a short interval hides it.
 - **Flashing** is per cell and coloured by direction: green when a value moved up, red when it moved down, with ▲/▼ marks as well so it never relies on colour alone. Chg % flashes by its own sign. The flash is off when the OS asks for reduced motion.
 - **Sort and filter** on every column. Each heading has a filter button beside its name. With the keyboard, Tab to a heading, then **Enter** sorts and **Ctrl+Enter** opens its filter (Alt+Down also works).
-- **Freeze stream** holds the numbers still while the worker keeps receiving; resuming catches up in one step.
+- **Freeze stream** holds the numbers and the chart still while the worker keeps receiving; resuming catches up in one step.
 - Rows with no update for 5 seconds are marked in the data but drawn as normal text, and nothing is marked while the tab is hidden.
 - The performance panel above the grid shows the live rates; there is no separate panel of connection facts.
 
+**Price chart.** Click a row (or use the symbol button in the Naive table, or Enter on a grid cell) to open a price chart for that symbol above the quotes; Escape or **Close chart** closes it. It shows the last five minutes: the server's price history (see [Instrument detail](#instrument-detail-depth-trades-and-history)) with live prices folded into the newest second. Both tabs draw it on an HTML `<canvas>` with the same drawing code (`frontend/src/chart/`), so they look identical; they differ in what drives it:
+
+| | Naive | Optimized |
+| --- | --- | --- |
+| Data | React state, copied and set again on every update of the symbol | Kept by the worker, which sends the whole chart only when it changed |
+| Drawing | An effect that redraws on every state change, on the page's thread | At most one drawing pass per animation frame, read from the store, with no React render |
+
+The chart has price and time axes (prices in the instrument's own decimals), a crosshair with a time and price label on hover, a shimmering skeleton while the history loads, and a sentence for assistive technology (last, high and low over the period). It follows the theme and the language.
+
 The first iteration built, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
 
-The Naive table shows fourteen columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, volume, tick size and decimals. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The Optimized tab shows the same fourteen columns, so every version does the same visible work and the benchmark compares like with like.
+The Naive table shows twelve columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, and volume. An instrument's tick size and decimals are static facts, so they are shown in the detail panel next to its chart and not as columns. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The Optimized tab shows the same twelve columns, so every version does the same visible work and the benchmark compares like with like.
 
 ### Run it
 

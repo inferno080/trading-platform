@@ -9,6 +9,12 @@ const PRICE_FLOOR_FRACTION = 0.2;
 const PREV_CLOSE_SPREAD = 0.01;
 const PREV_CLOSE_MAX_MOVE = 0.05;
 
+// Real spreads widen and tighten. A share of updates changes the spread by one tick, widening or narrowing it, but never
+// below the narrowest or above the widest (in ticks).
+const SPREAD_CHANGE_CHANCE = 0.15;
+const MIN_SPREAD_TICKS = 2;
+const MAX_SPREAD_TICKS = 12;
+
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 const symbolFor = (i: number): string => {
@@ -44,9 +50,15 @@ export class MarketSimulator {
   private readonly references: InstrumentReference[] = [];
   private readonly tickUnits: number[] = []; // the tick size, as a whole number of wire units (e.g. 5 for a 0.005 tick at 3 decimals)
   private readonly minBids: number[] = []; // the price floor, in wire units
+  // How many updates per second each instrument gets (its share of the total, by activity weight). Used to make the
+  // made-up price history as lively as the live prices: the more updates, the further the price wanders.
+  private readonly updatesPerSecond: Float64Array;
 
-  /** `activitySkew`: 0 makes every instrument equally active; 1 (default) makes a few very active (see config). */
-  constructor(instrumentCount: number, seed: number, activitySkew = 1) {
+  /**
+   * `activitySkew`: 0 makes every instrument equally active; 1 (default) makes a few very active (see config).
+   * `totalUpdatesPerSecond` is the rate across all instruments, which sets how volatile each one's made-up history is.
+   */
+  constructor(instrumentCount: number, seed: number, activitySkew = 1, totalUpdatesPerSecond = 0) {
     this.rng = createRng(seed);
     this.historyRng = createRng(seed ^ 0x5bd1e995);
     this.cumulativeWeight = new Float64Array(instrumentCount);
@@ -54,6 +66,11 @@ export class MarketSimulator {
     for (let i = 0; i < instrumentCount; i++) {
       running += Math.pow(i + 1, -activitySkew); // weight of the instrument at rank i + 1 is 1 / rank^skew
       this.cumulativeWeight[i] = running;
+    }
+    this.updatesPerSecond = new Float64Array(instrumentCount);
+    for (let i = 0; i < instrumentCount; i++) {
+      const weight = this.cumulativeWeight[i]! - (i > 0 ? this.cumulativeWeight[i - 1]! : 0);
+      this.updatesPerSecond[i] = (totalUpdatesPerSecond * weight) / running;
     }
     const now = Date.now();
     this.quotes = Array.from({ length: instrumentCount }, (_, id) => {
@@ -126,13 +143,19 @@ export class MarketSimulator {
     return this.quotes[id]!.last;
   }
 
-  /** Made-up past last prices of one instrument, oldest first, ending at its current price: a random walk run backwards. */
+  /**
+   * Made-up past last prices of one instrument, one per second, oldest first, ending at its current price: a random
+   * walk run backwards. Each live update moves the price by about 2 ticks, and the instrument gets so many updates a
+   * second, so over a second the price wanders about 2 * sqrt(updates per second) ticks. Using that here makes the
+   * past as lively as the present: a busy instrument swings widely, a quiet one hardly moves.
+   */
   backfillSeries(id: number, points: number): number[] {
     const series = new Array<number>(points);
+    const ticksPerSecond = 2 * Math.sqrt(this.updatesPerSecond[id]!);
     let price = this.quotes[id]!.last;
     for (let i = points - 1; i >= 0; i--) {
       series[i] = price;
-      const move = Math.round(this.historyRng.gauss() * 1.5) * this.tickUnits[id]!; // whole ticks, so prices stay on the grid
+      const move = Math.round(this.historyRng.gauss() * ticksPerSecond) * this.tickUnits[id]!; // whole ticks, so prices stay on the grid
       price = Math.max(this.minBids[id]!, price - move);
     }
     return series;
@@ -157,6 +180,23 @@ export class MarketSimulator {
     return this.quotes[low]!; // the first instrument whose running total passes the point
   }
 
+  /** Sometimes widen or narrow the spread by one tick, moving the bid or the ask (chosen at random) and keeping the limits. */
+  private changeSpread(q: Quote): void {
+    const roll = this.rng.next();
+    if (roll >= SPREAD_CHANGE_CHANCE) return;
+    const tick = this.tickUnits[q.id]!;
+    const spreadTicks = Math.round((q.ask - q.bid) / tick);
+    const widen = roll < SPREAD_CHANGE_CHANCE / 2;
+    if (widen ? spreadTicks >= MAX_SPREAD_TICKS : spreadTicks <= MIN_SPREAD_TICKS) return;
+    const onBidSide = this.rng.next() < 0.5;
+    if (onBidSide) {
+      const bid = q.bid + (widen ? -tick : tick); // widening lowers the bid, narrowing raises it
+      if (bid >= this.minBids[q.id]!) q.bid = bid; // the bid may not fall below its floor
+    } else {
+      q.ask += widen ? tick : -tick;
+    }
+  }
+
   /** Mutate `count` instruments (the more active ones more often) and return what changed. */
   step(count: number, now: number): QuoteUpdate[] {
     const out: QuoteUpdate[] = new Array(count);
@@ -164,9 +204,10 @@ export class MarketSimulator {
       const q = this.pickInstrument();
       // random move in whole ticks (bell curve, ~2 ticks), clamped so the bid stays at or above the floor
       const move = Math.max(Math.round(this.rng.gauss() * 2) * this.tickUnits[q.id]!, this.minBids[q.id]! - q.bid);
-      // shift bid and ask together, so the spread stays the same
+      // shift bid and ask together, then sometimes widen or narrow the spread by a tick
       q.bid += move;
       q.ask += move;
+      this.changeSpread(q);
       q.bidSz = 100 * (1 + this.rng.int(50));
       q.askSz = 100 * (1 + this.rng.int(50));
       // 20% of steps simulate a trade at the bid or ask, adding to volume

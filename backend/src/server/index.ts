@@ -16,7 +16,7 @@ import {
   type QuoteUpdate,
 } from "../protocol/messages.js";
 
-const sim = new MarketSimulator(config.instruments, config.seed, config.activitySkew);
+const sim = new MarketSimulator(config.instruments, config.seed, config.activitySkew, config.updatesPerSecond);
 const wss = new WebSocketServer({ port: config.port, perMessageDeflate: false });
 // The reference data never changes, so it is encoded once and the same bytes are sent to each client that asks.
 const referenceFrame = encodeMessage({ t: "reference", instruments: sim.reference() });
@@ -66,12 +66,20 @@ const sendSnapshot = (ws: WebSocket): void => {
   bytesSent += frame.byteLength;
 };
 
-// Sends one frame to one client unless it is not keeping up. Used for the extra per-instrument streams, which a
-// slow client can simply miss: a depth ladder is replaced by the next one, and the chart does not need every trade.
-const sendFrame = (ws: WebSocket, frame: Uint8Array): void => {
-  if (ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > config.maxBufferedBytes) return;
+// Answers one request from one client: the history, a refusal, the first depth ladder. A reply is sent whatever the
+// state of the client's buffer, because it is sent once and nothing would ever repeat it. (Skipping it for a client
+// that is behind, as the streams below do, would leave a slow client waiting for ever.)
+const sendReply = (ws: WebSocket, frame: Uint8Array): void => {
+  if (ws.readyState !== WebSocket.OPEN) return;
   ws.send(frame, { binary: true });
   bytesSent += frame.byteLength;
+};
+
+// Sends one frame of an extra stream (depth, trades) unless the client is not keeping up. A slow client can simply
+// miss some: the next depth ladder replaces the last one, and the chart does not need every trade.
+const sendStreamFrame = (ws: WebSocket, frame: Uint8Array): void => {
+  if (ws.bufferedAmount > config.maxBufferedBytes) return;
+  sendReply(ws, frame);
 };
 
 const depthFrame = (id: number, now: number): Uint8Array =>
@@ -83,11 +91,11 @@ const rejectedFrame = (request: Rejected["request"], id: number, reason: Rejecte
 const handleSubscribe = (ws: WebSocket, id: number): void => {
   const result = subs.subscribe(ws, id);
   if (result === "limit" || result === "unknown-instrument") {
-    sendFrame(ws, rejectedFrame("subscribe", id, result));
+    sendReply(ws, rejectedFrame("subscribe", id, result));
     return;
   }
   sim.watch(id);
-  sendFrame(ws, depthFrame(id, Date.now())); // the ladder appears at once, not at the instrument's next update
+  sendReply(ws, depthFrame(id, Date.now())); // the ladder appears at once, not at the instrument's next update
 };
 
 const handleUnsubscribe = (ws: WebSocket, id: number): void => {
@@ -96,10 +104,10 @@ const handleUnsubscribe = (ws: WebSocket, id: number): void => {
 
 const handleHistory = (ws: WebSocket, id: number): void => {
   if (id < 0 || id >= sim.size) {
-    sendFrame(ws, rejectedFrame("history", id, "unknown-instrument"));
+    sendReply(ws, rejectedFrame("history", id, "unknown-instrument"));
     return;
   }
-  sendFrame(ws, encodeMessage({ t: "history", id, points: history.points(id) }));
+  sendReply(ws, encodeMessage({ t: "history", id, points: history.points(id) }));
 };
 
 // Abruptly ends every client connection, like a network failure. Returns how many there were.
@@ -194,7 +202,7 @@ startTicker(config.tickMs, () => {
   // The depth and trades of this tick travel with the delta: held back by latency, and lost with it by a gap.
   const deliver = (): void => {
     broadcast(frame, updateCount);
-    for (const { id, frame: extraFrame } of extra) for (const ws of subs.watchers(id)) sendFrame(ws, extraFrame);
+    for (const { id, frame: extraFrame } of extra) for (const ws of subs.watchers(id)) sendStreamFrame(ws, extraFrame);
   };
   const delay = chaos.deliveryDelay(now);
   if (delay > 0) setTimeout(deliver, delay);

@@ -57,7 +57,7 @@ function RecordNote({ record }: { record: RecordState }) {
   );
 }
 
-/** A grid that redraws less often than every change looks smoother than it is, so say so before anyone records it. */
+/** A screen that refreshes less often than every change looks smoother than it is, so say so before anyone records it. */
 function RefreshWarning({ seconds }: { seconds: number | null }) {
   const t = useT();
   if (!seconds) return null; // null: no such setting (Naive); 0: every change, which is the fair way to measure
@@ -67,7 +67,7 @@ function RefreshWarning({ seconds }: { seconds: number | null }) {
 interface HudProps {
   session: Session | null;
   mode: PipelineMode;
-  /** How often the grid redraws, in seconds (0 for every change), for tabs that have that setting. */
+  /** How often the display refreshes, in seconds (0 for every change), for tabs that have that setting. */
   refreshSeconds?: number | null;
 }
 

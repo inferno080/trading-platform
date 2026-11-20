@@ -308,7 +308,10 @@ main:focus {
 }
 
 /* Quotes grid (AG Grid takes its colors from the design tokens; see QuotesGrid.tsx) */
+/* The Naive table and the Optimized grid are the same size: 70% of the width of the HUD (which is the full width of the
+   page), and the same height. On a narrow screen they take the full width, because 70% of it would be too small to read. */
 .grid-wrap {
+  width: 70%;
   height: min(70vh, 760px);
   min-height: 360px;
 }
@@ -350,7 +353,8 @@ main:focus {
 
 /* Quotes table */
 .table-wrap {
-  max-height: 70vh;
+  width: 70%; /* see .grid-wrap */
+  max-height: min(70vh, 760px);
   overflow: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -392,5 +396,95 @@ td:first-child,
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Symbol detail panel and its price chart (shared by both tabs) */
+.symbol-detail {
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.symbol-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.symbol-detail-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+.symbol-detail-header h2:focus-visible {
+  outline-offset: 4px;
+}
+.symbol-detail-name {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+.symbol-detail-close {
+  margin-inline-start: auto;
+}
+.chart-area {
+  position: relative;
+  height: 240px;
+}
+.chart-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.chart-canvas[data-ready="false"] {
+  visibility: hidden;
+}
+.chart-overlay {
+  position: absolute;
+  inset: 0;
+}
+.chart-message {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+/* The symbol in the Naive table is a real button, so the chart can be opened with the keyboard, but it looks like the
+   plain text next to it: the row is what shows it can be clicked (see the hover rule below), as in the grid. */
+.symbol-button {
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.symbol-button:hover:not(:disabled) {
+  border: 0;
+}
+/* Row hover, like AG Grid's: a light tint under the pointer. */
+tbody tr:hover {
+  background-color: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg));
+}
+table tr[class~="row-selected"],
+.grid-wrap .ag-row.row-selected {
+  background-color: color-mix(in srgb, var(--color-accent) 16%, var(--color-bg));
+  box-shadow: inset 3px 0 0 var(--color-accent); /* a bar as well as a tint, so the selection never relies on colour alone */
+}
+tbody tr {
+  cursor: pointer;
+}
+.grid-wrap .ag-row {
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .grid-wrap,
+  .table-wrap {
+    width: 100%;
   }
 }

@@ -1,3 +1,4 @@
+import type { ChartUpdate } from "../feed/messages";
 import type { InstrumentReference, Quote } from "../protocol/messages";
 
 /** An instrument with no update for this long is shown as stale. */
@@ -57,6 +58,31 @@ export class FeedStore {
 
   get rows(): Row[] {
     return [...this.rowsById.values()];
+  }
+
+  /** One row, or undefined if there is none (yet) for that instrument. */
+  row(id: number): Row | undefined {
+    return this.rowsById.get(id);
+  }
+
+  /** The reference data of one instrument, once it has arrived. */
+  instrument(id: number): InstrumentReference | undefined {
+    return this.reference?.get(id);
+  }
+
+  /** The price chart of the selected instrument, as last sent by the worker; null when there is none. */
+  chart: ChartUpdate | null = null;
+  private readonly chartListeners = new Set<() => void>();
+
+  setChart(chart: ChartUpdate | null): void {
+    this.chart = chart;
+    for (const listener of this.chartListeners) listener();
+  }
+
+  /** Be told when the chart changes. Returns the way to stop. */
+  subscribeChart(listener: () => void): () => void {
+    this.chartListeners.add(listener);
+    return () => this.chartListeners.delete(listener);
   }
 
   subscribe(listener: (change: RowsChange) => void): () => void {

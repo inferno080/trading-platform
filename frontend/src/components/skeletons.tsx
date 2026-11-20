@@ -29,6 +29,26 @@ const statusBars: Bar[] = [
   { x: 18, y: 3, width: 48, height: 10 },
 ];
 
+const CHART_HEIGHT = 240;
+
+// Five price labels down the left, a faint grid line beside each, and a few short bars where a line would run.
+const chartBars: Bar[] = [
+  ...Array.from({ length: 5 }, (_, i): Bar[] => [
+    { x: 0, y: 11 + i * 47, width: 52, height: 10 },
+    { x: 68, y: 17 + i * 47, width: "88%", height: 2, rx: 1 },
+  ]).flat(),
+  { x: "12%", y: 150, width: "14%", height: 4 },
+  { x: "28%", y: 120, width: "14%", height: 4 },
+  { x: "44%", y: 132, width: "14%", height: 4 },
+  { x: "60%", y: 90, width: "14%", height: 4 },
+  { x: "76%", y: 104, width: "14%", height: 4 },
+];
+
+/** Placeholder for a price chart while its history is on its way. */
+export function ChartSkeleton() {
+  return <SkeletonSvg height={CHART_HEIGHT} bars={chartBars} />;
+}
+
 /** Placeholder for the quotes table while the first snapshot is on its way. */
 export function TableSkeleton() {
   return (

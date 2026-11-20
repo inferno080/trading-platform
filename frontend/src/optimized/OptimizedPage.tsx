@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { SymbolDetail } from "../chart/SymbolDetail";
 import { TableSkeleton } from "../components/skeletons";
 import { Hud } from "../hud/Hud";
 import { useT } from "../i18n/useT";
 import { PROTOCOL_VERSION } from "../protocol/messages";
+import type { FeedStore } from "./feedStore";
+import { OptimizedChart } from "./OptimizedChart";
 import { QuotesGrid } from "./QuotesGrid";
 import { DEFAULT_REFRESH_SECONDS, MAX_REFRESH_SECONDS, parseRefreshSeconds } from "./refresh";
 import { useFeedWorker } from "./useFeedWorker";
@@ -40,6 +43,48 @@ function RefreshControl({ seconds, onChange }: { seconds: number; onChange: (sec
   );
 }
 
+/** The panel with the price chart of one instrument, once the page knows its symbol and reference data. */
+function SelectedChart({
+  store,
+  id,
+  unavailable,
+  refreshMs,
+  frozen,
+  onClose,
+}: {
+  store: FeedStore;
+  id: number;
+  unavailable: boolean;
+  refreshMs: number;
+  frozen: boolean;
+  onClose: () => void;
+}) {
+  const row = store.row(id);
+  const instrument = store.instrument(id);
+  if (!row || !instrument) return null;
+  return (
+    <SymbolDetail
+      symbol={row.sym}
+      name={instrument.name}
+      currency={instrument.currency}
+      tickSize={instrument.tickSize}
+      decimals={instrument.decimals}
+      onClose={onClose}
+    >
+      <OptimizedChart
+        key={id}
+        store={store}
+        id={id}
+        symbol={row.sym}
+        decimals={instrument.decimals}
+        unavailable={unavailable}
+        refreshMs={refreshMs}
+        frozen={frozen}
+      />
+    </SymbolDetail>
+  );
+}
+
 /**
  * The optimized iteration: a Web Worker owns the connection and conflates updates, the page pulls them once per
  * animation frame into a store, and AG Grid draws only the rows on screen, at a rate a person can read.
@@ -48,7 +93,8 @@ export function OptimizedPage() {
   const t = useT();
   const [frozen, setFrozen] = useState(false);
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_REFRESH_SECONDS);
-  const { state, store } = useFeedWorker();
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { state, store } = useFeedWorker(selectedId);
   const { status, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
 
@@ -75,8 +121,19 @@ export function OptimizedPage() {
 
       <Hud session={session} mode="optimized" refreshSeconds={refreshSeconds} />
 
+      {ready && selectedId !== null && (
+        <SelectedChart
+          store={store}
+          id={selectedId}
+          unavailable={state.chartUnavailable === selectedId}
+          refreshMs={refreshSeconds * 1000}
+          frozen={frozen}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
+
       {ready ? (
-        <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} />
+        <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={setSelectedId} />
       ) : (
         <div role="status">
           <span className="visually-hidden">{t("table.waiting")}</span>

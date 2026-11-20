@@ -7,6 +7,7 @@ import {
   LocaleModule,
   ModuleRegistry,
   NumberFilterModule,
+  RowApiModule,
   RowStyleModule,
   TextFilterModule,
   ValidationModule,
@@ -32,7 +33,8 @@ ModuleRegistry.registerModules([
   TextFilterModule,
   NumberFilterModule,
   CellStyleModule, // colour classes on cells
-  RowStyleModule, // the stale-row class
+  RowApiModule, // redrawing rows, so the selected row's highlight updates
+  RowStyleModule, // the stale-row and selected-row classes
   HighlightChangesModule, // the flash when a value changes
   LocaleModule, // translated grid text
   ...(import.meta.env.DEV ? [ValidationModule] : []),
@@ -52,6 +54,8 @@ const GRID_THEME = themeQuartz.withParams({
   rowHeight: 28,
   headerHeight: 32,
   browserColorScheme: "inherit",
+  // The flash of a value with no direction (and of any value before it has moved) is grey, not green or red.
+  valueChangeValueHighlightBackgroundColor: "color-mix(in srgb, var(--color-text-muted) 30%, transparent)",
 });
 
 // ag-grid has built-in text in several languages; English is its default.
@@ -59,7 +63,7 @@ const LOCALE_TEXT: Record<string, Record<string, string>> = { "ja-JP": AG_GRID_L
 
 const getRowId = (params: GetRowIdParams<Row>): string => String(params.data.id);
 // Rules, unlike a fixed class, are checked again every time a row changes, so a row leaves the stale look when it ticks.
-const ROW_CLASS_RULES = { "row-stale": (params: { data?: Row }) => params.data?.stale === true };
+const STALE_RULE = (params: { data?: Row }) => params.data?.stale === true;
 
 /**
  * The quotes in an AG Grid. Only the rows on screen exist in the page, and changes are handed to the grid as one
@@ -71,12 +75,30 @@ const ROW_CLASS_RULES = { "row-stale": (params: { data?: Row }) => params.data?.
  *
  * While `frozen`, the grid draws nothing so the numbers hold still; unfreezing redraws from the store in one step.
  */
-export function QuotesGrid({ store, frozen, refreshMs }: { store: FeedStore; frozen: boolean; refreshMs: number }) {
+interface QuotesGridProps {
+  store: FeedStore;
+  frozen: boolean;
+  refreshMs: number;
+  /** The instrument whose chart is open, if any, and how to open one (a click on its row, or Enter on a cell in it). */
+  selectedId?: number | null;
+  onSelect?: (id: number) => void;
+}
+
+export function QuotesGrid({ store, frozen, refreshMs, selectedId = null, onSelect }: QuotesGridProps) {
   const t = useT();
   const { locale } = useIntl();
   const reducedMotion = usePrefersReducedMotion();
   const api = useRef<GridApi<Row> | null>(null);
   const region = useRef<HTMLDivElement>(null);
+  const selected = useRef(selectedId); // read by the row rules, which the grid evaluates itself
+  const rowClassRules = useMemo(
+    () => ({ "row-stale": STALE_RULE, "row-selected": (params: { data?: Row }) => params.data?.id === selected.current }),
+    [],
+  );
+  useEffect(() => {
+    selected.current = selectedId;
+    api.current?.redrawRows(); // the rules are checked again for every row on screen
+  }, [selectedId]);
   const [initialRows] = useState(() => store.rows); // fixed: later changes arrive through the subscription, not through this prop
 
   const columnDefs = useMemo(() => buildColumns(t, locale, !reducedMotion), [t, locale, reducedMotion]);
@@ -149,7 +171,11 @@ export function QuotesGrid({ store, frozen, refreshMs }: { store: FeedStore; fro
         defaultColDef={defaultColDef}
         rowData={initialRows}
         getRowId={getRowId}
-        rowClassRules={ROW_CLASS_RULES}
+        rowClassRules={rowClassRules}
+        onRowClicked={(event) => event.data && onSelect?.(event.data.id)}
+        onCellKeyDown={(event) => {
+          if ((event.event as KeyboardEvent | null)?.key === "Enter" && event.data) onSelect?.(event.data.id);
+        }}
         localeText={LOCALE_TEXT[locale]}
         onGridReady={onGridReady}
         suppressMenuHide // keep each column's filter button visible, not only on hover

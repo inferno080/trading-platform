@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWorkerFactory } from "../feed/FeedWorkerContext";
 import type { FeedStatus, WorkerEvent } from "../feed/messages";
+import type { WorkerLike } from "../feed/FeedWorkerContext";
 import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
 import type { Session } from "../protocol/messages";
@@ -20,6 +21,8 @@ export interface FeedWorkerState {
   badVersion: number | null;
   /** True once the first snapshot has arrived. */
   hasSnapshot: boolean;
+  /** The instrument the server has no price history for, when the chart asked for one. */
+  chartUnavailable: number | null;
 }
 
 export const initialFeedState: FeedWorkerState = {
@@ -30,6 +33,7 @@ export const initialFeedState: FeedWorkerState = {
   referenceMissing: false,
   badVersion: null,
   hasSnapshot: false,
+  chartUnavailable: null,
 };
 
 /**
@@ -54,6 +58,8 @@ export function reduceWorkerEvent(state: FeedWorkerState, event: WorkerEvent): F
       return state.hasSnapshot ? state : { ...state, hasSnapshot: true };
     case "batch":
       return state;
+    case "chartUnavailable":
+      return { ...state, chartUnavailable: event.id };
   }
 }
 
@@ -78,19 +84,22 @@ export const RESUME_GRACE_MS = 1_000;
  * request outstanding. The pace is therefore set by the page: if drawing is slow, frames are late, requests are
  * late, and the worker simply conflates more.
  */
-export function useFeedWorker(): { state: FeedWorkerState; store: FeedStore } {
+export function useFeedWorker(selectedId: number | null = null): { state: FeedWorkerState; store: FeedStore } {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
   const [store] = useState(() => new FeedStore());
+  const worker = useRef<WorkerLike | null>(null);
+  const selected = useRef(selectedId); // what a worker started later should be told
 
   useEffect(() => {
     collector.reset(); // start clean: counters from a previously active tab must not leak in
-    const worker = createWorker();
+    const connection = createWorker();
+    worker.current = connection;
     let pullOutstanding = false;
     let pullSentAt = 0;
     let visibleSince = Date.now();
 
-    worker.onmessage = (event) => {
+    connection.onmessage = (event) => {
       const message = event.data;
       if (message.type === "reference") store.setReference(message.instruments, Date.now());
       else if (message.type === "snapshot") store.setSnapshot(message.quotes, Date.now());
@@ -98,10 +107,12 @@ export function useFeedWorker(): { state: FeedWorkerState; store: FeedStore } {
         pullOutstanding = false;
         collector.onBatch(message.stats);
         store.applyBatch(message.updates, Date.now());
+        if (message.chart) store.setChart(message.chart);
       }
       setState((previous) => reduceWorkerEvent(previous, message));
     };
-    worker.postMessage({ type: "connect", url: WS_URL });
+    connection.postMessage({ type: "connect", url: WS_URL });
+    if (selected.current !== null) connection.postMessage({ type: "select", id: selected.current });
 
     let frame = requestAnimationFrame(function onFrame() {
       const now = Date.now();
@@ -109,7 +120,7 @@ export function useFeedWorker(): { state: FeedWorkerState; store: FeedStore } {
       if (!pullOutstanding || now - pullSentAt > PULL_TIMEOUT_MS) {
         pullOutstanding = true;
         pullSentAt = now;
-        worker.postMessage({ type: "pull" });
+        connection.postMessage({ type: "pull" });
       }
       frame = requestAnimationFrame(onFrame);
     });
@@ -128,10 +139,18 @@ export function useFeedWorker(): { state: FeedWorkerState; store: FeedStore } {
       cancelAnimationFrame(frame);
       clearInterval(sweep);
       document.removeEventListener("visibilitychange", onVisibility);
-      worker.onmessage = null;
-      worker.terminate();
+      connection.onmessage = null;
+      connection.terminate();
+      worker.current = null;
     };
   }, [createWorker, store]);
+
+  // Choosing another instrument (or none) starts a fresh chart: the old one is dropped and the worker is told.
+  useEffect(() => {
+    selected.current = selectedId;
+    store.setChart(null);
+    worker.current?.postMessage({ type: "select", id: selectedId });
+  }, [selectedId, store]);
 
   return { state, store };
 }

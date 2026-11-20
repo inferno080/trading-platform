@@ -67,7 +67,49 @@ export interface ReferenceData {
   instruments: InstrumentReference[];
 }
 
-export type ServerMessage = Session | Snapshot | Delta | ReferenceData;
+/** One rung of the order book: a price (wire integer) and the quantity waiting at it. */
+export type DepthLevel = [price: number, size: number];
+
+/** The order book of one instrument the client subscribed to. The whole ladder every time, best price first. */
+export interface Depth {
+  t: "depth";
+  id: number;
+  ts: number;
+  bids: DepthLevel[];
+  asks: DepthLevel[];
+}
+
+/** One completed trade. A "buy" trades at the ask, a "sell" at the bid. */
+export interface Trade {
+  ts: number;
+  price: number;
+  size: number;
+  side: "buy" | "sell";
+}
+
+/** The trades of one subscribed instrument since the last frame, oldest first. */
+export interface Trades {
+  t: "trades";
+  id: number;
+  trades: Trade[];
+}
+
+/** Recent price history of one instrument, oldest first: [epoch ms, last price as a wire integer]. Sent in reply to a HistoryRequest. */
+export interface HistoryData {
+  t: "history";
+  id: number;
+  points: [ts: number, price: number][];
+}
+
+/** Why a request was refused. */
+export interface Rejected {
+  t: "rejected";
+  request: "subscribe" | "history";
+  id: number;
+  reason: "limit" | "unknown-instrument";
+}
+
+export type ServerMessage = Session | Snapshot | Delta | ReferenceData | Depth | Trades | HistoryData | Rejected;
 
 export interface ResyncRequest {
   t: "resync";
@@ -78,4 +120,22 @@ export interface ReferenceRequest {
   t: "reference";
 }
 
-export type ClientMessage = ResyncRequest | ReferenceRequest;
+/** Starts the depth ladder and trades feed for one instrument. */
+export interface SubscribeRequest {
+  t: "subscribe";
+  id: number;
+}
+
+/** Stops them. */
+export interface UnsubscribeRequest {
+  t: "unsubscribe";
+  id: number;
+}
+
+/** Asks once for the recent price history of one instrument. */
+export interface HistoryRequest {
+  t: "history";
+  id: number;
+}
+
+export type ClientMessage = ResyncRequest | ReferenceRequest | SubscribeRequest | UnsubscribeRequest | HistoryRequest;
