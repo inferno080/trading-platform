@@ -176,3 +176,88 @@ describe("FeedStore", () => {
     expect(calls).to.have.length(1);
   });
 });
+
+describe("FeedStore: price charts", () => {
+  const chartOf = (id: number, ...numbers: number[]) => ({ id, data: Float64Array.from(numbers) });
+
+  it("has no chart for an instrument until the worker sends one", () => {
+    expect(new FeedStore().chart(1)).to.equal(undefined);
+  });
+
+  it("holds each instrument's chart as the worker last sent it", () => {
+    const store = new FeedStore();
+    store.setCharts([chartOf(1, 0, 100, 1000, 101), chartOf(2, 0, 500)]);
+    expect([...store.chart(1)!]).to.deep.equal([0, 100, 1000, 101]);
+    expect([...store.chart(2)!]).to.deep.equal([0, 500]);
+  });
+
+  it("replaces an instrument's chart with the newer one, and leaves the others alone", () => {
+    const store = new FeedStore();
+    store.setCharts([chartOf(1, 0, 100), chartOf(2, 0, 500)]);
+    store.setCharts([chartOf(1, 0, 100, 1000, 105)]);
+    expect([...store.chart(1)!]).to.deep.equal([0, 100, 1000, 105]);
+    expect([...store.chart(2)!]).to.deep.equal([0, 500]);
+  });
+
+  it("tells listeners which instruments' charts changed", () => {
+    const store = new FeedStore();
+    const heard: number[][] = [];
+    store.subscribeCharts((ids) => heard.push(ids));
+    store.setCharts([chartOf(1, 0, 1), chartOf(2, 0, 2)]);
+    store.setCharts([chartOf(2, 0, 3)]);
+    expect(heard).to.deep.equal([[1, 2], [2]]);
+  });
+
+  it("stops telling a listener that unsubscribed", () => {
+    const store = new FeedStore();
+    const heard: number[][] = [];
+    const unsubscribe = store.subscribeCharts((ids) => heard.push(ids));
+    store.setCharts([chartOf(1, 0, 1)]);
+    unsubscribe();
+    store.setCharts([chartOf(1, 0, 2)]);
+    expect(heard).to.have.length(1);
+  });
+
+  it("forgets the charts of instruments that are no longer tracked, so one that returns starts from its skeleton", () => {
+    const store = new FeedStore();
+    store.setCharts([chartOf(1, 0, 1), chartOf(2, 0, 2), chartOf(3, 0, 3)]);
+    store.keepCharts(new Set([2]));
+    expect(store.chart(1)).to.equal(undefined);
+    expect(store.chart(2)).to.not.equal(undefined);
+    expect(store.chart(3)).to.equal(undefined);
+  });
+
+  it("keeps everything when everything is still tracked, and forgets everything when nothing is", () => {
+    const store = new FeedStore();
+    store.setCharts([chartOf(1, 0, 1), chartOf(2, 0, 2)]);
+    store.keepCharts(new Set([1, 2]));
+    expect(store.chart(1)).to.not.equal(undefined);
+    store.keepCharts(new Set());
+    expect(store.chart(1)).to.equal(undefined);
+    expect(store.chart(2)).to.equal(undefined);
+  });
+
+  it("does not tell listeners when charts are forgotten (nothing new to draw)", () => {
+    const store = new FeedStore();
+    store.setCharts([chartOf(1, 0, 1)]);
+    let heard = 0;
+    store.subscribeCharts(() => heard++);
+    store.keepCharts(new Set());
+    expect(heard).to.equal(0);
+  });
+});
+
+describe("FeedStore: looking things up", () => {
+  it("gives one row by instrument id, once rows exist", () => {
+    const { store } = ready();
+    expect(store.row(1)?.sym).to.equal("AAB");
+    expect(store.row(99)).to.equal(undefined);
+  });
+
+  it("gives one instrument's reference data once it has arrived", () => {
+    const { store } = ready();
+    expect(store.instrument(2)?.name).to.equal("Cobalt Capital Inc.");
+    expect(store.instrument(99)).to.equal(undefined);
+    expect(new FeedStore().instrument(0)).to.equal(undefined);
+  });
+});

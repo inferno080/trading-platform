@@ -1,5 +1,5 @@
 import type { Result } from "axe-core";
-import { NAIVE, emulateMedia, waitForLiveGrid, waitForLiveTable } from "../support/e2e";
+import { NAIVE, emulateMedia, waitForChartDrawn, waitForLiveGrid, waitForLiveTable } from "../support/e2e";
 
 // WCAG 2.2 level AA, as far as an automated scan can check it. Manual checks (screen reader, zoom
 // by eye) are still needed; automated tools find roughly a third of issues.
@@ -105,6 +105,87 @@ describe("accessibility of the Optimized tab (the default view)", () => {
     waitForLiveGrid();
     cy.document().then((doc) => {
       expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth);
+    });
+  });
+});
+
+// The chart, the watchlist with entries in it, and the toast, on both tabs. As above, a value that has just changed
+// flashes a highlight, so the Optimized scans run with reduced motion (when the grid does not flash).
+describe("accessibility of the chart and the watchlist", () => {
+  const TABS = [
+    { name: "Naive", url: NAIVE, ready: waitForLiveTable },
+    { name: "Optimized", url: "/", ready: waitForLiveGrid },
+  ];
+  beforeEach(() => emulateMedia([{ name: "prefers-reduced-motion", value: "reduce" }]));
+
+  for (const tab of TABS) {
+    for (const theme of ["light", "dark"] as const) {
+      for (const locale of ["en-US", "ja-JP"]) {
+        it(`${tab.name}: no violations with the chart open and symbols on the watchlist: ${theme} theme, ${locale}`, () => {
+          visitWith({ theme, locale }, tab.url);
+          tab.ready();
+          waitForChartDrawn();
+          cy.get(".symbol-detail-watch").click();
+          cy.get(".watchlist .watch-item").should("have.length", 1);
+          cy.get('.watchlist canvas.mini-canvas[data-ready="true"]', { timeout: 30000 }).should("exist");
+          scan();
+        });
+      }
+    }
+
+    it(`${tab.name}: no violations while the toast is showing`, () => {
+      cy.visit(tab.url, { onBeforeLoad: (win) => win.localStorage.setItem("watchlist", "[1,2,3,4]") }); // already full
+      tab.ready();
+      waitForChartDrawn();
+      cy.get(".symbol-detail-watch").click(); // AAA would be a fifth
+      cy.get(".toast").should("be.visible");
+      scan();
+    });
+
+    it(`${tab.name}: no violations with the watchlist collapsed`, () => {
+      cy.visit(tab.url);
+      tab.ready();
+      waitForChartDrawn();
+      cy.get(".watchlist-toggle").click();
+      cy.get(".watchlist").should("not.exist");
+      scan();
+    });
+
+    it(`${tab.name}: no violations while the chart and the watchlist are still loading (skeletons)`, () => {
+      cy.visit(tab.url, { onBeforeLoad: (win) => win.localStorage.setItem("watchlist", "[1,2]") });
+      cy.get("svg.skeleton").should("exist");
+      scan();
+    });
+
+    it(`${tab.name}: the open chart, its buttons and each watchlist entry have names for assistive technology`, () => {
+      cy.visit(tab.url, { onBeforeLoad: (win) => win.localStorage.setItem("watchlist", "[1,2]") });
+      tab.ready();
+      waitForChartDrawn();
+      cy.get("canvas.chart-canvas").should("have.attr", "role", "img").and("have.attr", "aria-label");
+      cy.get(".watchlist .watch-item").each(($item) => {
+        cy.wrap($item).find("button").each(($button) => expect($button.attr("aria-label"), "button name").to.be.a("string").and.not.be.empty);
+        cy.wrap($item).find("canvas").should("have.attr", "role", "img");
+      });
+    });
+  }
+
+  it("makes the watchlist's buttons at least 24 by 24 pixels (WCAG 2.5.8)", () => {
+    cy.visit("/", { onBeforeLoad: (win) => win.localStorage.setItem("watchlist", "[1,2]") });
+    waitForLiveGrid();
+    cy.get(".watchlist button, .watchlist-toggle, .symbol-detail button").each(($control) => {
+      const { width, height } = $control[0]?.getBoundingClientRect() ?? { width: 0, height: 0 };
+      expect(width, `${$control.attr("aria-label") ?? $control.text()} width`).to.be.at.least(24);
+      expect(height, `${$control.attr("aria-label") ?? $control.text()} height`).to.be.at.least(24);
+    });
+  });
+
+  it("reflows to a 320 pixel wide screen without sideways scrolling of the page, with the watchlist below the quotes", () => {
+    cy.viewport(320, 800);
+    cy.visit("/", { onBeforeLoad: (win) => win.localStorage.setItem("watchlist", "[1]") });
+    waitForLiveGrid();
+    cy.document().then((doc) => expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth));
+    cy.get(".workspace-main").then(($main) => {
+      cy.get(".workspace-side").then(($side) => expect($side[0]!.getBoundingClientRect().top).to.be.at.least($main[0]!.getBoundingClientRect().bottom - 1));
     });
   });
 });

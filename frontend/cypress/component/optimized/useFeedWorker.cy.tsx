@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { collector } from "../../../src/hud/collector";
 import type { FeedStats, WorkerCommand } from "../../../src/feed/messages";
 import { WS_URL } from "../../../src/feed/url";
@@ -48,6 +49,14 @@ describe("reduceWorkerEvent", () => {
     const first = reduceWorkerEvent(initialFeedState, { type: "snapshot", quotes: [] });
     expect(first.hasSnapshot).to.equal(true);
     expect(reduceWorkerEvent(first, { type: "snapshot", quotes: [] })).to.equal(first);
+  });
+
+  it("remembers which instruments the server has no price history for, once each", () => {
+    const first = reduceWorkerEvent(initialFeedState, { type: "chartUnavailable", id: 4 });
+    expect(first.chartUnavailable).to.deep.equal([4]);
+    const second = reduceWorkerEvent(first, { type: "chartUnavailable", id: 7 });
+    expect(second.chartUnavailable).to.deep.equal([4, 7]);
+    expect(reduceWorkerEvent(second, { type: "chartUnavailable", id: 4 })).to.equal(second); // already known: the same state
   });
 
   it("returns the very same state for a batch, so 60 batches a second cause no page renders", () => {
@@ -191,5 +200,89 @@ describe("useFeedWorker", () => {
       cy.tick(RESUME_GRACE_MS - 1).then(() => expect(latest.store.rows.some((row) => row.stale)).to.equal(false));
       cy.tick(sweepInterval * 2).then(() => expect(latest.store.rows.every((row) => row.stale)).to.equal(true)); // nothing arrived, so they are stale
     });
+  });
+});
+
+describe("useFeedWorker: charts and the watchlist", () => {
+  let latest: { state: FeedWorkerState; store: FeedStore };
+  let setChoice: (choice: { selectedId: number | null; watchlist: number[] }) => void;
+  const posted = (type: string) => FakeWorker.latest.posted.filter((command: WorkerCommand) => command.type === type);
+
+  function Host({ selectedId, watchlist }: { selectedId: number | null; watchlist: number[] }) {
+    latest = useFeedWorker(selectedId, watchlist);
+    return <output>{latest.state.status}</output>;
+  }
+  // The page's part: it holds what is open and what is on the watchlist, and the test changes them through `setChoice`.
+  function Page({ initial }: { initial: { selectedId: number | null; watchlist: number[] } }) {
+    const [choice, setState] = useState(initial);
+    setChoice = setState;
+    return <Host selectedId={choice.selectedId} watchlist={choice.watchlist} />;
+  }
+  const mount = (selectedId: number | null, watchlist: number[]) => {
+    cy.mount(withFakeWorker(<Page initial={{ selectedId, watchlist }} />));
+    cy.wrap(FakeWorker.instances).should("have.length.greaterThan", 0);
+  };
+  const change = (selectedId: number | null, watchlist: number[]) => cy.then(() => setChoice({ selectedId, watchlist }));
+  const chart = (id: number, ...numbers: number[]) => ({ id, data: Float64Array.from(numbers) });
+
+  it("tells a new worker which chart is open and which symbols are on the watchlist", () => {
+    mount(1, [2, 3]);
+    cy.wrap(null).should(() => {
+      expect(posted("select").at(-1)).to.deep.equal({ type: "select", id: 1 });
+      expect(posted("watch").at(-1)).to.deep.equal({ type: "watch", ids: [2, 3] });
+    });
+  });
+
+  it("tells the worker when another chart is opened, or none", () => {
+    mount(1, []);
+    change(4, []);
+    cy.wrap(null).should(() => expect(posted("select").at(-1)).to.deep.equal({ type: "select", id: 4 }));
+    change(null, []);
+    cy.wrap(null).should(() => expect(posted("select").at(-1)).to.deep.equal({ type: "select", id: null }));
+  });
+
+  it("tells the worker when the watchlist changes", () => {
+    mount(null, [1]);
+    change(null, [1, 5]);
+    cy.wrap(null).should(() => expect(posted("watch").at(-1)).to.deep.equal({ type: "watch", ids: [1, 5] }));
+    change(null, []);
+    cy.wrap(null).should(() => expect(posted("watch").at(-1)).to.deep.equal({ type: "watch", ids: [] }));
+  });
+
+  it("puts the charts that arrive with a batch into the store", () => {
+    mount(1, [2]);
+    cy.then(() => FakeWorker.latest.emit({ type: "batch", updates: [], stats: STATS, charts: [chart(1, 0, 100), chart(2, 0, 200)] }));
+    cy.wrap(null).should(() => {
+      expect([...latest.store.chart(1)!]).to.deep.equal([0, 100]);
+      expect([...latest.store.chart(2)!]).to.deep.equal([0, 200]);
+    });
+  });
+
+  it("drops the chart of a symbol that is no longer open or on the watchlist, and keeps the others", () => {
+    mount(1, [2]);
+    cy.then(() => FakeWorker.latest.emit({ type: "batch", updates: [], stats: STATS, charts: [chart(1, 0, 100), chart(2, 0, 200)] }));
+    cy.wrap(null).should(() => expect(latest.store.chart(1)).to.not.equal(undefined));
+    change(null, [2]); // the open chart is closed
+    cy.wrap(null).should(() => {
+      expect(latest.store.chart(1)).to.equal(undefined);
+      expect(latest.store.chart(2)).to.not.equal(undefined);
+    });
+    change(null, []); // and 2 is taken off the watchlist
+    cy.wrap(null).should(() => expect(latest.store.chart(2)).to.equal(undefined));
+  });
+
+  it("keeps the chart of a symbol that is open and on the watchlist when it is closed", () => {
+    mount(1, [1]);
+    cy.then(() => FakeWorker.latest.emit({ type: "batch", updates: [], stats: STATS, charts: [chart(1, 0, 100)] }));
+    cy.wrap(null).should(() => expect(latest.store.chart(1)).to.not.equal(undefined));
+    change(null, [1]);
+    afterFrames(5);
+    cy.then(() => expect(latest.store.chart(1)).to.not.equal(undefined));
+  });
+
+  it("reflects, in its state, a symbol the server has no history for", () => {
+    mount(9, []);
+    cy.then(() => FakeWorker.latest.emit({ type: "chartUnavailable", id: 9 }));
+    cy.wrap(null).should(() => expect(latest.state.chartUnavailable).to.deep.equal([9]));
   });
 });

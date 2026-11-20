@@ -304,7 +304,7 @@ cd frontend && npm run build && npm run preview -- --port 4173    # terminal 2
 cd frontend && npm run test:e2e                                   # terminal 3
 ```
 
-They cover the live table, loading and error states, navigation and keyboard use, the theme and language settings (including that they persist), a full real-time benchmark recording, and an automated WCAG 2.2 AA scan with [axe](https://github.com/dequelabs/axe-core) in both themes and both languages. The end-to-end run takes about a minute because the recording test runs in real time.
+They cover the live table and grid, the price chart and the watchlist on both tabs (against the real backend, including that adding a symbol subscribes to it and removing it unsubscribes), loading and error states, navigation and keyboard use, the theme and language settings (including that they persist), a full real-time benchmark recording, and an automated WCAG 2.2 AA scan with [axe](https://github.com/dequelabs/axe-core) in both themes and both languages. The end-to-end run takes about a minute because the recording test runs in real time.
 
 An automated scan finds only part of the accessibility problems. A manual pass with a screen reader is still needed.
 
@@ -328,9 +328,14 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 
 - [x] Frontend: naive React client, to capture a baseline
 - [x] Web Worker for the socket and decoding, with per-symbol conflation
-- [x] Virtualized grid (AG Grid), with cell flash on change, stale-data indicators, sort, filter and freeze
+- [x] Virtualized grid (AG Grid), with cell flash on change, sort, filter and freeze
 - [x] Gap detection and resync in the worker
-- [ ] Reconnect with a connection state machine
-- [ ] Performance HUD: FPS, messages/sec, latency percentiles, long tasks, heap
-- [ ] Backend: L2 depth, trades stream, per-symbol subscribe, chaos controls
+- [x] Backend: per-symbol subscribe, L2 depth, trades stream and price history
+- [x] Price chart for the open symbol, on both tabs
+- [x] Collapsible watchlist with mini charts and subscribe/unsubscribe, on both tabs
+- [ ] Depth ladder and trades tape for the open symbol
+- [ ] RFQ ticket with a state machine
+- [ ] Reconnect with a connection state machine, and chaos controls in the UI
+- [ ] Performance HUD: long tasks
+- [ ] More languages (de-DE, Arabic right-to-left)
 - [x] Drift-corrected simulator timing

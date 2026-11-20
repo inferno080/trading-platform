@@ -1,6 +1,8 @@
 import { OptimizedPage } from "../../../src/optimized/OptimizedPage";
 import { FakeWorker } from "../../support/fakeWorker";
-import { makeQuote, makeReferenceData, makeSession, makeSnapshot } from "../../support/fixtures";
+import { series } from "../../support/canvas";
+import { afterFrames } from "../../support/frames";
+import { makeQuote, makeReference, makeReferenceData, makeSession, makeSnapshot } from "../../support/fixtures";
 import { withFakeWorker, withI18n } from "../../support/render";
 
 const STATS = { messages: 5, updatesIn: 100, gaps: 0, latencies: [3] };
@@ -103,16 +105,16 @@ describe("OptimizedPage", () => {
   describe("the refresh interval", () => {
     it("is a labelled number box that starts at 1.5 seconds, with a hint", () => {
       mountPage();
-      cy.contains("label", "Refresh grid every (seconds)").should("have.attr", "for", "refresh-seconds");
+      cy.contains("label", "Refresh every (seconds)").should("have.attr", "for", "refresh-seconds");
       refreshBox().should("have.value", "1.5").and("have.attr", "type", "number").and("have.attr", "aria-describedby", "refresh-hint");
       cy.get("#refresh-hint").should("contain.text", "0 draws every frame");
     });
 
     it("warns in the performance panel that the default interval flatters a benchmark, until it is set to 0", () => {
       mountPage();
-      cy.get(".hud-warning").should("contain.text", "redraws every 1.5 s");
+      cy.get(".hud-warning").should("contain.text", "refreshes every 1.5 s");
       refreshBox().clear().type("0");
-      cy.contains(".hud-warning", "redraws every").should("not.exist");
+      cy.contains(".hud-warning", "refreshes every").should("not.exist");
     });
 
     it("holds changes back at the start, because the interval is 1.5 seconds", () => {
@@ -187,5 +189,253 @@ describe("OptimizedPage", () => {
     mountPage();
     cy.then(() => cy.mount(<span>gone</span>));
     cy.then(() => expect(FakeWorker.latest.terminated).to.equal(true));
+  });
+});
+
+// ---------- the open chart and the watchlist ----------
+
+const commands = (type: string) => FakeWorker.latest.posted.filter((command) => command.type === type);
+const lastCommand = (type: string) => commands(type).at(-1);
+const panelItems = () => cy.get(".watchlist .watch-item");
+
+/** A worker that has delivered `count` instruments (AAA, AAB, ...) and the first snapshot. */
+const deliverMarketWith = (count: number) => {
+  worker().then((w) => {
+    w.emit({ type: "ready", scope: "DedicatedWorkerGlobalScope" });
+    w.emit({ type: "status", status: "live" });
+    w.emit({ type: "session", session: makeSession({ instruments: count }) });
+    w.emit({ type: "reference", instruments: Array.from({ length: count }, (_, id) => makeReference(id)) });
+    w.emit({ type: "snapshot", quotes: makeSnapshot(1, Array.from({ length: count }, (_, id) => makeQuote(id))).quotes });
+  });
+  cy.get(".ag-row[row-id]").should("have.length", count);
+};
+const sendChart = (id: number, last = 29920, count = 60) =>
+  worker().then((w) => w.emit({ type: "batch", updates: [], stats: STATS, charts: [{ id, data: Float64Array.from(series(count, (i) => last - (count - 1 - i) * 5)) }] }));
+
+describe("OptimizedPage: the open chart", () => {
+  it("opens AAA's chart as the page loads, and tells the worker", () => {
+    mountPage();
+    cy.wrap(null).should(() => expect(lastCommand("select")).to.deep.equal({ type: "select", id: 0 }));
+    deliverMarketWith(6);
+    cy.get("#symbol-detail-title").should("have.text", "AAA price chart");
+  });
+
+  it("does not move keyboard focus into the chart that opened by itself", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get("#symbol-detail-title").should("exist");
+    cy.get("#symbol-detail-title").should("not.have.focus");
+  });
+
+  it("shows a skeleton panel from the first moment, before the page has any data", () => {
+    mountPage();
+    cy.get("section.symbol-detail[role=status] svg.skeleton").should("exist");
+    cy.get("#symbol-detail-title").should("not.exist");
+  });
+
+  it("shows the chart's skeleton until the chart has been drawn, then the chart", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+    sendChart(0);
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    cy.get(".chart-area .chart-overlay").should("not.exist");
+  });
+
+  it("says so when the server has no history for the open symbol, and shows no skeleton", () => {
+    mountPage();
+    deliverMarketWith(6);
+    worker().then((w) => w.emit({ type: "chartUnavailable", id: 0 }));
+    cy.get("p.chart-message").should("have.attr", "role", "alert").and("contain.text", "Price history is not available");
+    cy.get(".chart-area svg.skeleton").should("not.exist");
+  });
+
+  it("opens another symbol's chart when its row is clicked, and tells the worker", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get('.ag-row[row-id="2"] [col-id="name"]').click();
+    cy.get("#symbol-detail-title").should("have.text", "AAC price chart");
+    cy.wrap(null).should(() => expect(lastCommand("select")).to.deep.equal({ type: "select", id: 2 }));
+    cy.get('.ag-row[row-id="2"]').should("have.class", "row-selected");
+  });
+
+  it("opens a symbol's chart with Enter on a focused cell of its row", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get('.ag-row[row-id="3"] [col-id="bid"]').click();
+    cy.get("#symbol-detail-title").should("have.text", "AAD price chart");
+    cy.get('.ag-row[row-id="4"] [col-id="bid"]').click();
+    cy.realPress("Enter");
+    cy.get("#symbol-detail-title").should("have.text", "S4 price chart");
+  });
+
+  it("closes with the Close chart button or Escape, and tells the worker there is no chart", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.contains("button", "Close chart").click();
+    cy.get("section.symbol-detail").should("not.exist");
+    cy.wrap(null).should(() => expect(lastCommand("select")).to.deep.equal({ type: "select", id: null }));
+    cy.get('.ag-row[row-id="1"] [col-id="name"]').click();
+    cy.get("#symbol-detail-title").should("exist");
+    cy.get("body").type("{esc}");
+    cy.get("section.symbol-detail").should("not.exist");
+  });
+
+  it("holds the chart still when the stream is frozen, and catches up when it is resumed", () => {
+    mountPage();
+    deliverMarketWith(6);
+    refreshBox().clear().type("0");
+    sendChart(0, 29920);
+    cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("contain", "last 299.20");
+    cy.contains("button", "Freeze stream").click();
+    sendChart(0, 31000);
+    afterFrames(10);
+    cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("contain", "last 299.20");
+    cy.contains("button", "Freeze stream").click();
+    cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("contain", "last 310.00");
+  });
+});
+
+describe("OptimizedPage: the watchlist", () => {
+  it("is on the page from the first moment, with the same layout, so nothing jumps when the data arrives", () => {
+    mountPage();
+    cy.get(".workspace[data-watchlist=open] .workspace-main .skeleton-frame").should("exist"); // the table's skeleton
+    cy.get(".workspace-side .watchlist").should("exist");
+  });
+
+  it("shows skeletons for saved entries before the page knows their symbols", () => {
+    localStorage.setItem("watchlist", "[1,3]");
+    mountPage();
+    cy.get(".watchlist .watch-item").should("have.length", 2);
+    cy.get(".watchlist .watch-item .mini-chart[role=status] svg.skeleton").should("have.length", 2);
+  });
+
+  it("tells the worker about a saved watchlist when it starts", () => {
+    localStorage.setItem("watchlist", "[1,3]");
+    mountPage();
+    cy.wrap(null).should(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [1, 3] }));
+  });
+
+  describe("adding", () => {
+    it("adds the open symbol from its chart: the worker subscribes, and a mini chart appears for it", () => {
+      mountPage();
+      deliverMarketWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      cy.get(".watchlist-toggle").should("have.text", "Watchlist (1)");
+      panelItems().should("have.length", 1).first().should("contain.text", "AAA");
+      cy.wrap(null).should(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [0] }));
+      cy.contains("button", "Remove from watchlist").should("exist");
+      panelItems().first().find("svg.skeleton").should("exist");
+      sendChart(0, 29920);
+      panelItems().first().find("canvas.mini-canvas").should("have.attr", "data-ready", "true");
+      panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+    });
+
+    it("shows a toast, and adds nothing, when the watchlist is full", () => {
+      localStorage.setItem("watchlist", "[1,2,3,4]");
+      mountPage();
+      deliverMarketWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      cy.get(".toast").should("contain.text", "The watchlist is full (4 symbols). Remove one to add another.");
+      panelItems().should("have.length", 4);
+      cy.get(".watchlist-toggle").should("have.text", "Watchlist (4)");
+      cy.then(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [1, 2, 3, 4] }));
+    });
+
+    it("lets the toast be dismissed with its button", () => {
+      localStorage.setItem("watchlist", "[1,2,3,4]");
+      mountPage();
+      deliverMarketWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      cy.get(".toast button").click();
+      cy.get(".toast").should("not.exist");
+    });
+  });
+
+  describe("removing (unsubscribing)", () => {
+    it("takes the symbol off, tells the worker to unsubscribe, and moves focus to the heading", () => {
+      mountPage();
+      deliverMarketWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      panelItems().should("have.length", 1);
+      cy.get('button[aria-label="Remove AAA from the watchlist"]').click();
+      panelItems().should("have.length", 0);
+      cy.get("#watchlist-title").should("have.focus");
+      cy.wrap(null).should(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [] }));
+    });
+
+    it("takes a symbol off from its own chart with Remove from watchlist", () => {
+      mountPage();
+      deliverMarketWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      cy.contains("button", "Remove from watchlist").click();
+      panelItems().should("have.length", 0);
+    });
+  });
+
+  it("opens a symbol's chart from its entry", () => {
+    localStorage.setItem("watchlist", "[2]");
+    mountPage();
+    deliverMarketWith(6);
+    cy.get('button[aria-label="Open the AAC chart"]').click();
+    cy.get("#symbol-detail-title").should("have.text", "AAC price chart");
+  });
+
+  describe("collapsing", () => {
+    it("hides the panel and gives the grid the whole width, and brings it back", () => {
+      mountPage();
+      deliverMarketWith(6);
+      cy.get(".workspace-main").then(($main) => {
+        const open = $main[0]!.getBoundingClientRect().width;
+        cy.get(".watchlist-toggle").click();
+        cy.get(".workspace").should("have.attr", "data-watchlist", "closed");
+        cy.get(".watchlist").should("not.exist");
+        cy.get(".workspace-main").should(($m) => expect($m[0]!.getBoundingClientRect().width).to.be.greaterThan(open + 100));
+        cy.get(".watchlist-toggle").click();
+        cy.get(".watchlist").should("exist");
+      });
+    });
+
+    it("keeps the symbols subscribed while the panel is hidden", () => {
+      mountPage();
+      deliverMarketWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      cy.get(".watchlist-toggle").click();
+      cy.then(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [0] }));
+    });
+
+    it("remembers that it was collapsed", () => {
+      localStorage.setItem("watchlist.open", "false");
+      mountPage();
+      deliverMarketWith(6);
+      cy.get(".workspace").should("have.attr", "data-watchlist", "closed");
+    });
+  });
+
+  it("follows the refresh interval and Freeze, like the grid and the big chart", () => {
+    localStorage.setItem("watchlist", "[1]");
+    mountPage();
+    deliverMarketWith(6);
+    refreshBox().clear().type("0");
+    sendChart(1, 29920);
+    panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+    cy.contains("button", "Freeze stream").click();
+    sendChart(1, 31000);
+    afterFrames(10);
+    panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+    cy.contains("button", "Freeze stream").click();
+    panelItems().first().find(".mini-caption").should("contain.text", "310.00");
+  });
+
+  it("can be used with the keyboard alone", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.contains("button", "Add to watchlist").focus().realPress("Enter");
+    panelItems().should("have.length", 1);
+    cy.get(".watchlist-toggle").focus().realPress("Space");
+    cy.get(".workspace").should("have.attr", "data-watchlist", "closed");
+    cy.get(".watchlist-toggle").realPress("Enter");
+    cy.get('button[aria-label="Remove AAA from the watchlist"]').focus().realPress("Enter");
+    panelItems().should("have.length", 0);
   });
 });

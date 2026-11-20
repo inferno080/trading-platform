@@ -136,17 +136,17 @@ describe("Hud", () => {
   describe("the refresh interval", () => {
     it("warns that a grid redrawing every 1.5 s flatters the numbers", () => {
       mountHud({ mode: "optimized", refreshSeconds: 1.5 });
-      cy.get(".hud-warning").should("contain.text", "redraws every 1.5 s").and("contain.text", "Set the refresh interval to 0");
+      cy.get(".hud-warning").should("contain.text", "refreshes every 1.5 s").and("contain.text", "Set the refresh interval to 0");
     });
 
     it("does not warn at 0, which is the fair way to measure", () => {
       mountHud({ mode: "optimized", refreshSeconds: 0 });
-      cy.contains(".hud-warning", "redraws every").should("not.exist");
+      cy.contains(".hud-warning", "refreshes every").should("not.exist");
     });
 
     it("does not warn on a tab with no such setting", () => {
       mountHud();
-      cy.contains(".hud-warning", "redraws every").should("not.exist");
+      cy.contains(".hud-warning", "refreshes every").should("not.exist");
     });
 
     it("saves the interval in the result file", () => {

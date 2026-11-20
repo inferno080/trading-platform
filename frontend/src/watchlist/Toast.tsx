@@ -10,15 +10,15 @@ const TOAST_MS = 7000;
  * and polite, so a screen reader announces each message when it appears without taking focus. It can be dismissed
  * with its button, and it stays while the pointer or keyboard focus is on it, so there is no rush to read it.
  */
-export function Toast({ toast, onDismiss }: { toast: ToastMessage | null; onDismiss: () => void }) {
+export function Toast({ toast, onDismiss, durationMs = TOAST_MS }: { toast: ToastMessage | null; onDismiss: () => void; durationMs?: number }) {
   const t = useT();
   const [held, setHeld] = useState(false);
 
   useEffect(() => {
     if (!toast || held) return;
-    const timer = setTimeout(onDismiss, TOAST_MS);
+    const timer = setTimeout(onDismiss, durationMs);
     return () => clearTimeout(timer);
-  }, [toast, held, onDismiss]);
+  }, [toast, held, onDismiss, durationMs]);
 
   return (
     <div className="toast-region" role="status" aria-live="polite">

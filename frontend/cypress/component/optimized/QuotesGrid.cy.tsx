@@ -32,11 +32,12 @@ describe("QuotesGrid", () => {
     cy.get("@consoleWarn").should("not.be.called");
   });
 
-  it("is a labelled region with a column for each of the 14 fields", () => {
+  it("is a labelled region with a column for each of the 12 fields", () => {
     mountGrid();
     cy.get("[role=region]").should("have.attr", "aria-label", "Live quotes grid");
-    cy.get(".ag-header-row-column [role=columnheader]").should("have.length", 14);
-    cy.get(".ag-header-row-column").first().should("contain.text", "Symbol").and("contain.text", "Decimals");
+    cy.get(".ag-header-row-column [role=columnheader]").should("have.length", 12);
+    cy.get(".ag-header-row-column").first().should("contain.text", "Symbol").and("contain.text", "Volume");
+    cy.get(".ag-header-row-column").first().should("not.contain.text", "Decimals").and("not.contain.text", "Tick size");
   });
 
   it("shows a row for each instrument, with prices formatted to the instrument's decimals", () => {
@@ -48,8 +49,7 @@ describe("QuotesGrid", () => {
     cell(0, "spread").should("have.text", "0.04");
     cell(0, "change").should("have.text", "+0.40%");
     cell(0, "bidSz").should("have.text", "2,700");
-    cell(0, "tickSize").should("have.text", "0.01");
-    cell(0, "decimals").should("have.text", "2");
+    cell(0, "vol").should("have.text", "8,600");
   });
 
   it("shows an instrument with three decimals to three decimals", () => {
@@ -58,7 +58,6 @@ describe("QuotesGrid", () => {
     store.setSnapshot([makeQuote(0, { bid: 150_120, ask: 150_130, last: 150_125 })], 0);
     mountGrid(store);
     cell(0, "last").should("have.text", "150.125");
-    cell(0, "tickSize").should("have.text", "0.005");
   });
 
   describe("live changes", () => {
@@ -144,7 +143,7 @@ describe("QuotesGrid", () => {
 
     it("puts the filter button to the right of the column name in every column, text and numeric alike", () => {
       mountGrid();
-      cy.get(".ag-header-cell").should("have.length", 14);
+      cy.get(".ag-header-cell").should("have.length", 12);
       cy.get(".ag-header-cell").each(($header) => {
         const text = $header.find(".ag-header-cell-text")[0]!.getBoundingClientRect();
         const button = $header.find(".ag-header-cell-filter-button")[0]!.getBoundingClientRect();
@@ -330,5 +329,64 @@ describe("QuotesGrid", () => {
     localStorage.setItem("locale", "ja-JP");
     mountGrid();
     cy.get(".ag-header-row-column").first().should("contain.text", "銘柄");
+  });
+
+  describe("choosing a symbol", () => {
+    const mountSelectable = (selectedId: number | null = null) => {
+      const onSelect = cy.stub().as("select");
+      const store = readyStore();
+      cy.mount(withI18n(<QuotesGrid store={store} frozen={false} refreshMs={0} selectedId={selectedId} onSelect={onSelect} />));
+      cy.get(".ag-row[row-id]").should("have.length", 3);
+      return store;
+    };
+
+    it("chooses a symbol when its row is clicked", () => {
+      mountSelectable();
+      cell(1, "name").click();
+      cy.get("@select").should("have.been.calledWith", 1);
+    });
+
+    it("chooses a symbol with Enter on a focused cell of its row", () => {
+      mountSelectable();
+      cell(2, "bid").click();
+      cy.get("@select").invoke("resetHistory");
+      cy.realPress("Enter");
+      cy.get("@select").should("have.been.calledWith", 2);
+    });
+
+    it("marks the chosen row, with a bar as well as a tint, so the choice never relies on colour alone", () => {
+      mountSelectable(1);
+      cy.get('[row-id="1"]').should("have.class", "row-selected").and("have.css", "box-shadow").and("not.equal", "none");
+      cy.get('[row-id="0"]').should("not.have.class", "row-selected");
+    });
+
+    it("moves the mark when another symbol is chosen", () => {
+      function Harness() {
+        const [id, setId] = useState<number | null>(0);
+        return (
+          <>
+            <button onClick={() => setId(2)}>choose 2</button>
+            <QuotesGrid store={readyStoreOnce} frozen={false} refreshMs={0} selectedId={id} onSelect={setId} />
+          </>
+        );
+      }
+      const readyStoreOnce = readyStore();
+      cy.mount(withI18n(<Harness />));
+      cy.get('[row-id="0"]').should("have.class", "row-selected");
+      cy.contains("button", "choose 2").click();
+      cy.get('[row-id="2"]').should("have.class", "row-selected");
+      cy.get('[row-id="0"]').should("not.have.class", "row-selected");
+    });
+
+    it("is a pointer on a row, so it looks clickable", () => {
+      mountSelectable();
+      cy.get('[row-id="0"]').should("have.css", "cursor", "pointer");
+    });
+
+    it("does nothing, and does not fail, when no one is listening for a choice", () => {
+      mountGrid();
+      cell(0, "name").click();
+      cy.get(".ag-row[row-id]").should("have.length", 3);
+    });
   });
 });

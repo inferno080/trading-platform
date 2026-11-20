@@ -102,7 +102,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
       setChartUnavailable((previous) => (previous.every((id) => wanted.has(id)) ? previous : previous.filter((id) => wanted.has(id))));
 
       const ws = socket.current;
-      if (ws?.readyState !== WebSocket.OPEN) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return; // nothing can be sent until the connection is open
       for (const id of wanted) {
         if (requested.current.has(id)) continue;
         requested.current.add(id);

@@ -462,6 +462,7 @@ td:first-child,
 /* The symbol in the Naive table is a real button, so the chart can be opened with the keyboard, but it looks like the
    plain text next to it: the row is what shows it can be clicked (see the hover rule below), as in the grid. */
 .symbol-button {
+  min-width: 24px; /* a target at least 24 by 24 pixels (WCAG 2.5.8), even for a short symbol */
   min-height: 24px;
   margin: 0;
   padding: 0;

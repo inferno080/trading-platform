@@ -36,15 +36,13 @@ describe("the Optimized tab, with the real worker and server", () => {
     });
   });
 
-  it("shows the same 14 columns as the Naive tab, and each price with its own decimals", () => {
+  it("shows the same 12 columns as the Naive tab, and each price with its own decimals", () => {
     cy.visit("/");
     waitForLiveGrid();
-    cy.get(".ag-header-row-column [role=columnheader]").should("have.length", 14);
+    cy.get(".ag-header-row-column [role=columnheader]").should("have.length", 12);
     cy.get('.ag-row[row-id="0"]').then(($row) => {
       const text = (column: string) => $row.find(`[col-id="${column}"]`).text();
       expect(text("currency")).to.equal("USD");
-      expect(text("decimals")).to.equal("2");
-      expect(text("tickSize")).to.equal("0.01");
       for (const column of ["bid", "ask", "last", "prevClose"]) expect(text(column)).to.match(PRICE);
     });
   });

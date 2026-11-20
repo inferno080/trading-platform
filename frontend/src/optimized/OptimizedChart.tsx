@@ -33,6 +33,7 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
   const size = useCanvasSize(canvas);
   const themeVersion = useThemeVersion();
   const hoverX = useRef<number | null>(null);
+  const shown = useRef<Float64Array | undefined>(undefined); // what was last drawn: a frozen chart redraws this, not newer data
   const schedule = useRef<() => void>(() => undefined); // draw soon, because the data changed: held to the refresh interval
   const scheduleNow = useRef<() => void>(() => undefined); // draw at the next frame, whatever the interval: for the pointer, a resize, a theme
   const [painted, setPainted] = useState(false); // the skeleton stays until the chart has really been drawn once
@@ -41,13 +42,14 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
     let frame = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let drawnAt = -Infinity;
-    let labelledAt = 0;
+    let labelledAt = -Infinity; // so the very first drawing always describes the chart
     const draw = () => {
       frame = 0;
       const element = canvas.current;
       const context = element?.getContext("2d");
-      const data = store.chart(id);
+      const data = frozen ? shown.current : store.chart(id); // frozen: hold the view, even through a resize or a new theme
       if (!element || !context || !data || size.width === 0) return;
+      shown.current = data;
       drawChart(context, data, { ...size, decimals, locale, hoverX: hoverX.current }, readChartColors());
       drawnAt = performance.now();
       setPainted(true);

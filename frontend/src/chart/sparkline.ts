@@ -54,5 +54,5 @@ export function sparkCaption(data: ArrayLike<number> | undefined, decimals: numb
   const arrow = direction > 0 ? "▲" : direction < 0 ? "▼" : ""; // eslint-disable-line sonarjs/no-nested-conditional
   const price = decimalFormatter(locale, decimals).format(last / 10 ** decimals);
   const change = first === 0 ? "" : percentFormatter(locale).format(last / first - 1);
-  return { text: `${price}  ${arrow} ${change}`.trim(), direction };
+  return { text: `${price}  ${[arrow, change].filter(Boolean).join(" ")}`.trim(), direction };
 }

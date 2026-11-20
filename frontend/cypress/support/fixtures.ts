@@ -2,6 +2,10 @@ import type { Row } from "../../src/optimized/feedStore";
 import {
   PROTOCOL_VERSION,
   type Delta,
+  type Depth,
+  type HistoryData,
+  type Rejected,
+  type Trades,
   type InstrumentReference,
   type Quote,
   type QuoteUpdate,
@@ -105,3 +109,22 @@ export const makeRow = (overrides: Partial<Row> = {}): Row => ({
   updatedAt: 0,
   ...overrides,
 });
+
+/** A price history reply: one point per second, ending at `last`, oldest first. */
+export const makeHistory = (id: number, count = 3, last = 29920, start = 1_000_000): HistoryData => ({
+  t: "history",
+  id,
+  points: Array.from({ length: count }, (_, i): [number, number] => [start + i * 1000, last - (count - 1 - i) * 10]),
+});
+
+/** The server refusing a request. */
+export const makeRejected = (request: Rejected["request"], id: number, reason: Rejected["reason"] = "unknown-instrument"): Rejected => ({
+  t: "rejected",
+  request,
+  id,
+  reason,
+});
+
+/** The extra streams the server sends for a subscribed instrument. */
+export const makeDepth = (id: number): Depth => ({ t: "depth", id, ts: 1, bids: [[29917, 2700]], asks: [[29921, 3500]] });
+export const makeTrades = (id: number): Trades => ({ t: "trades", id, trades: [{ ts: 1, price: 29920, size: 300, side: "buy" }] });

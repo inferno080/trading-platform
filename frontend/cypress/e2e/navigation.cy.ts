@@ -79,7 +79,13 @@ describe("navigation and keyboard use", () => {
     cy.realPress("Tab");
     cy.focused().should("have.attr", "role", "tab").and("have.id", "tab-naive"); // only the selected tab is in the Tab order
     cy.realPress("Tab");
+    cy.focused().should("have.class", "watchlist-toggle");
+    cy.realPress("Tab");
     cy.focused().should("have.class", "record-button");
+    cy.realPress("Tab");
+    cy.focused().should("have.class", "symbol-detail-watch"); // the open chart's buttons
+    cy.realPress("Tab");
+    cy.focused().should("have.class", "symbol-detail-close");
     cy.realPress("Tab");
     cy.focused().should("have.class", "table-wrap"); // the scrollable table can be reached and scrolled by keyboard
   });

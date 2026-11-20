@@ -17,7 +17,14 @@ export class FakeWebSocket {
     return socket;
   }
 
+  // The same numbers as the browser's WebSocket, so code that asks "is it open?" behaves the same.
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+
   binaryType = "blob";
+  readyState = FakeWebSocket.CONNECTING;
   closed = false;
   sent: Uint8Array[] = [];
   onopen: (() => void) | null = null;
@@ -35,10 +42,12 @@ export class FakeWebSocket {
 
   close(): void {
     this.closed = true;
+    this.readyState = FakeWebSocket.CLOSED;
   }
 
   /** Test helper: the connection opens. */
   open(): void {
+    this.readyState = FakeWebSocket.OPEN;
     this.onopen?.();
   }
 
@@ -56,6 +65,7 @@ export class FakeWebSocket {
 
   /** Test helper: the server closes the connection. */
   drop(): void {
+    this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.();
   }
 }

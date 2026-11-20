@@ -27,6 +27,7 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, refreshMs, fro
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
   const caption = useRef<HTMLSpanElement>(null);
+  const shown = useRef<Float64Array | undefined>(undefined); // what was last drawn: a frozen chart redraws this, not newer data
   const size = useCanvasSize(canvas);
   const themeVersion = useThemeVersion();
   const [painted, setPainted] = useState(false); // the skeleton stays until the chart has really been drawn once
@@ -38,8 +39,9 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, refreshMs, fro
     const draw = () => {
       frame = 0;
       const context = canvas.current?.getContext("2d");
-      const data = store.chart(id);
+      const data = frozen ? shown.current : store.chart(id); // frozen: hold the view, even through a resize or a new theme
       if (!context || !data || size.width === 0) return;
+      shown.current = data;
       drawSparkline(context, data, size, readChartColors());
       drawnAt = performance.now();
       setPainted(true);

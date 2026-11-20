@@ -16,7 +16,7 @@ describe("the live dashboard", () => {
     waitForLiveTable();
     cy.get("tbody tr").first().find("td").then(($cells) => {
       // The data cells after the symbol, in column order.
-      const columns = ["name", "currency", "bid", "ask", "spread", "last", "prevClose", "change", "bidSize", "askSize", "volume", "tick", "decimals"] as const;
+      const columns = ["name", "currency", "bid", "ask", "spread", "last", "prevClose", "change", "bidSize", "askSize", "volume"] as const;
       const row = Object.fromEntries(columns.map((column, index) => [column, $cells[index]?.textContent ?? ""])) as Record<(typeof columns)[number], string>;
       const price = /^\d{1,3}(,\d{3})*\.\d{2}$/; // the first instrument is a USD equity with 2 decimals
       const whole = (text: string) => Number(text.replace(/,/g, ""));
@@ -28,8 +28,6 @@ describe("the live dashboard", () => {
       expect(row.spread).to.match(/^\d+\.\d{2}$/);
       expect(row.change).to.match(/^[+-]?\d+\.\d{2}%$/);
       for (const value of [row.bidSize, row.askSize, row.volume]) expect(value).to.match(/^[\d,]+$/);
-      expect(row.tick).to.equal("0.01");
-      expect(row.decimals).to.equal("2");
     });
   });
 
@@ -37,19 +35,21 @@ describe("the live dashboard", () => {
     cy.visit(NAIVE);
     waitForLiveTable();
     cy.get("tbody tr").then(($rows) => {
-      // Columns: symbol (th), then name, currency, bid, ask, spread, last, prev close, chg, sizes, volume, tick, decimals.
+      // Columns: symbol (th), then name, currency, bid, ask, spread, last, prev close, chg, sizes, volume.
       const seen = new Set<string>();
       for (const row of $rows) {
         const cells = [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? "");
-        const [, currency, bid, , , , prevClose, , , , , tick, decimals] = cells;
+        const [, currency, bid, ask, spread, last, prevClose] = cells;
         const fraction = (text: string | undefined) => (text ?? "").split(".")[1]?.length ?? 0;
-        const kind = `${currency} ${decimals}dp tick ${tick}`;
+        const decimals = fraction(bid);
+        const kind = `${currency} ${decimals}dp`;
         seen.add(kind);
-        // The number of digits after the point is exactly the instrument's decimals, in every price column.
-        expect(fraction(bid), `${kind} bid ${bid}`).to.equal(Number(decimals));
-        expect(fraction(prevClose), `${kind} prev close ${prevClose}`).to.equal(Number(decimals));
+        // Every price of an instrument has the same number of decimals: the instrument's own.
+        for (const [name, value] of Object.entries({ ask, spread, last, prevClose })) {
+          expect(fraction(value), `${kind} ${name} ${value}`).to.equal(decimals);
+        }
       }
-      expect([...seen].sort()).to.deep.equal(["EUR 3dp tick 0.005", "JPY 0dp tick 1", "USD 2dp tick 0.01", "USD 4dp tick 0.0001"]);
+      expect([...seen].sort()).to.deep.equal(["EUR 3dp", "JPY 0dp", "USD 2dp", "USD 4dp"]);
     });
   });
 
