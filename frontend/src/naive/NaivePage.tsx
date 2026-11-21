@@ -7,6 +7,8 @@ import { PriceLine } from "../components/PriceLine";
 import { MiniChartLoading, SymbolDetailSkeleton } from "../components/skeletons";
 import { Hud } from "../hud/Hud";
 import { useT } from "../i18n/useT";
+import { RfqModal } from "../rfq/RfqModal";
+import type { RfqPort } from "../rfq/bridge";
 import { PROTOCOL_VERSION, type InstrumentReference, type Quote } from "../protocol/messages";
 import { Toast } from "../watchlist/Toast";
 import { useWatchlist } from "../watchlist/useWatchlist";
@@ -24,6 +26,7 @@ interface SelectedChartProps {
   instrument: InstrumentReference | undefined;
   data: number[] | null;
   book: Book;
+  rfq: RfqPort;
   unavailable: boolean;
   inWatchlist: boolean;
   onToggleWatchlist: () => void;
@@ -32,7 +35,7 @@ interface SelectedChartProps {
 }
 
 /** The panel with the open symbol's chart: its skeleton until the page knows the symbol, then the panel itself. */
-function SelectedChart({ quote, instrument, data, book, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
+function SelectedChart({ quote, instrument, data, book, rfq, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
   const { locale } = useIntl();
   if (!quote || !instrument) return <SymbolDetailSkeleton />;
   return (
@@ -47,6 +50,7 @@ function SelectedChart({ quote, instrument, data, book, unavailable, inWatchlist
       onClose={onClose}
       takeFocus={takeFocus}
       side={<BookPanel depth={book.depth} tape={book.tape} decimals={instrument.decimals} />}
+      ticket={<RfqModal key={quote.id} port={rfq} instrumentId={quote.id} symbol={quote.sym} decimals={instrument.decimals} />}
       price={<PriceLine summary={priceSummary(data ?? undefined, instrument.decimals, instrument.prevClose, locale)} variant="big" />}
     >
       <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} unavailable={unavailable} />
@@ -65,7 +69,7 @@ export function NaivePage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book } = useNaiveFeed(selectedId, watchlist.ids);
+  const { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids);
   const selectedQuote = selectedId === null ? undefined : quotes[selectedId];
   const selectedInstrument = selectedId === null ? undefined : reference?.get(selectedId);
 
@@ -103,6 +107,7 @@ export function NaivePage() {
             instrument={selectedInstrument}
             data={charts[selectedId] ?? null}
             book={book}
+            rfq={rfq}
             unavailable={chartUnavailable.includes(selectedId)}
             inWatchlist={watchlist.ids.includes(selectedId)}
             onToggleWatchlist={() => watchlist.toggle(selectedId)}

@@ -11,6 +11,8 @@ import { WatchlistToggle } from "../watchlist/WatchlistToggle";
 import { Workspace } from "../watchlist/Workspace";
 import type { FeedStore } from "./feedStore";
 import { FIRST_INSTRUMENT } from "../chart/series";
+import { RfqModal } from "../rfq/RfqModal";
+import type { RfqPort } from "../rfq/bridge";
 import { OptimizedBook } from "./OptimizedBook";
 import { OptimizedChart } from "./OptimizedChart";
 import { OptimizedMiniChart } from "./OptimizedMiniChart";
@@ -54,6 +56,7 @@ function RefreshControl({ seconds, onChange }: { seconds: number; onChange: (sec
 
 interface Display {
   store: FeedStore;
+  rfq: RfqPort;
   refreshMs: number;
   frozen: boolean;
 }
@@ -92,6 +95,7 @@ function SelectedChart({
       onClose={onClose}
       takeFocus={takeFocus}
       side={<OptimizedBook store={store} decimals={instrument.decimals} refreshMs={refreshMs} frozen={frozen} />}
+      ticket={<RfqModal key={id} port={display.rfq} instrumentId={id} symbol={row.sym} decimals={instrument.decimals} />}
       price={
         <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" refreshMs={refreshMs} frozen={frozen} />
       }
@@ -148,10 +152,10 @@ export function OptimizedPage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { state, store } = useFeedWorker(selectedId, watchlist.ids);
+  const { state, store, rfq } = useFeedWorker(selectedId, watchlist.ids);
   const { status, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
-  const display: Display = { store, refreshMs: refreshSeconds * 1000, frozen };
+  const display: Display = { store, rfq, refreshMs: refreshSeconds * 1000, frozen };
 
   return (
     // The scope name proves, to the tests, that the connection runs in a worker and not in the page.

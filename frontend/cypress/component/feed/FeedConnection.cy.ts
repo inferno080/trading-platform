@@ -590,3 +590,41 @@ describe("FeedConnection: the open instrument's order book and trades", () => {
     expect(sentRequests().filter((r) => r.startsWith("subscribe"))).to.have.length(5);
   });
 });
+
+describe("FeedConnection: requests for quotes", () => {
+  const sentMessages = () => FakeWebSocket.latest.sent.map((frame) => decode(frame) as Record<string, unknown>);
+  const request = { t: "rfq", ref: 9, id: 1, side: "buy", quantity: 500 } as const;
+
+  it("sends a request for a quote, an accept and a reject over the open connection", () => {
+    const { connection } = live();
+    connection.requestQuote(request);
+    connection.answerQuote("rfqAccept", 9);
+    connection.answerQuote("rfqReject", 9);
+    expect(sentMessages().slice(-3)).to.deep.equal([request, { t: "rfqAccept", ref: 9 }, { t: "rfqReject", ref: 9 }]);
+  });
+
+  it("tells the page at once that a request is lost when there is no open connection, and sends nothing", () => {
+    const { connection, events } = setup(); // never connected
+    connection.requestQuote(request);
+    expect(events).to.deep.equal([{ type: "rfqResult", result: { t: "rfqResult", ref: 9, outcome: "unknown" } }]);
+  });
+
+  it("sends nothing for an accept or reject without an open connection", () => {
+    const { connection } = setup();
+    connection.connect("ws://localhost:1"); // connecting, not open
+    connection.answerQuote("rfqAccept", 9);
+    expect(FakeWebSocket.latest.sent).to.have.length(0);
+  });
+
+  it("passes the dealer's quote and result on to the page", () => {
+    const { events } = live();
+    const quote = { t: "rfqQuote", ref: 9, id: 1, side: "buy", quantity: 500, price: 30398, screenPrice: 30396, validForMs: 10_000 } as const;
+    const result = { t: "rfqResult", ref: 9, outcome: "filled", price: 30398, tradeId: 3 } as const;
+    FakeWebSocket.latest.receive(quote);
+    FakeWebSocket.latest.receive(result);
+    expect(events).to.deep.equal([
+      { type: "rfqQuote", quote },
+      { type: "rfqResult", result },
+    ]);
+  });
+});

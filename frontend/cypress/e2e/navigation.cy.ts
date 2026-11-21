@@ -85,6 +85,8 @@ describe("navigation and keyboard use", () => {
     cy.realPress("Tab");
     cy.focused().should("have.class", "symbol-detail-watch"); // the open chart's buttons
     cy.realPress("Tab");
+    cy.focused().should("have.class", "rfq-open");
+    cy.realPress("Tab");
     cy.focused().should("have.class", "symbol-detail-close");
     cy.realPress("Tab");
     cy.focused().should("have.class", "table-wrap"); // the scrollable table can be reached and scrolled by keyboard

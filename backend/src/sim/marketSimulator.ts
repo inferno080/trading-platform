@@ -138,6 +138,12 @@ export class MarketSimulator {
     return buildDepth(this.quotes[id]!, this.tickUnits[id]!, levels);
   }
 
+  /** The best bid and ask of one instrument now, and its tick size, all as wire integers; null for an unknown instrument. */
+  screen(id: number): { bid: number; ask: number; tick: number } | null {
+    const quote = this.quotes[id];
+    return quote ? { bid: quote.bid, ask: quote.ask, tick: this.tickUnits[id]! } : null;
+  }
+
   /** The last traded price of one instrument, as a wire integer. */
   lastPrice(id: number): number {
     return this.quotes[id]!.last;

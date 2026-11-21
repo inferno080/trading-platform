@@ -1,6 +1,19 @@
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
 import { appendTick } from "../chart/series";
-import { PROTOCOL_VERSION, type HistoryData, type Quote, type QuoteUpdate, type Rejected, type Trade } from "../protocol/messages";
+import {
+  PROTOCOL_VERSION,
+  type Delta,
+  type HistoryData,
+  type Quote,
+  type QuoteUpdate,
+  type ReferenceData,
+  type Rejected,
+  type RfqRequest,
+  type ServerMessage,
+  type Session,
+  type Snapshot,
+  type Trade,
+} from "../protocol/messages";
 import type { DepthUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
 
 /** How long to wait for the reference data after the session before reporting that it is late. */
@@ -137,6 +150,17 @@ export class FeedConnection {
     }
   }
 
+  /** Ask the dealer for a quote. If there is no open connection, the request cannot be made, and the page is told so. */
+  requestQuote(request: RfqRequest): void {
+    if (this.open && this.socket) this.socket.send(encodeClientMessage(request));
+    else this.emit({ type: "rfqResult", result: { t: "rfqResult", ref: request.ref, outcome: "unknown" } });
+  }
+
+  /** Accept or turn down a quote. Without a connection nothing is sent: the page learns that from the connection's status. */
+  answerQuote(answer: "rfqAccept" | "rfqReject", ref: number): void {
+    if (this.open && this.socket) this.socket.send(encodeClientMessage({ t: answer, ref }));
+  }
+
   /** Hand over what changed since the last call: the latest state of each changed instrument, the counters, and the chart if it changed. */
   pull(): void {
     const updates: Quote[] = [];
@@ -206,6 +230,23 @@ export class FeedConnection {
         clearTimeout(this.referenceTimer);
         this.emit({ type: "reference", instruments: message.instruments });
         break;
+      case "snapshot":
+        this.lastSeq = message.seq;
+        this.quotes = message.quotes;
+        this.changed.clear(); // the snapshot already holds everything pending
+        this.emit({ type: "snapshot", quotes: message.quotes });
+        break;
+      case "delta":
+        this.applyDelta(socket, message.seq, message.ts, message.updates);
+        break;
+      default:
+        this.handleDetail(message); // everything that is about one instrument, or about quotes
+    }
+  }
+
+  /** The messages that are not the market itself: the open instrument's chart, order book and trades, and the dealer's replies. */
+  private handleDetail(message: Exclude<ServerMessage, Session | ReferenceData | Snapshot | Delta>): void {
+    switch (message.t) {
       case "history":
       case "rejected":
         this.handleChartReply(message);
@@ -217,14 +258,11 @@ export class FeedConnection {
       case "trades":
         if (message.id === this.selectedId) this.newTrades.push(...message.trades);
         break;
-      case "snapshot":
-        this.lastSeq = message.seq;
-        this.quotes = message.quotes;
-        this.changed.clear(); // the snapshot already holds everything pending
-        this.emit({ type: "snapshot", quotes: message.quotes });
+      case "rfqQuote":
+        this.emit({ type: "rfqQuote", quote: message });
         break;
-      case "delta":
-        this.applyDelta(socket, message.seq, message.ts, message.updates);
+      case "rfqResult":
+        this.emit({ type: "rfqResult", result: message });
         break;
     }
   }

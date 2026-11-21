@@ -25,6 +25,8 @@ interface SymbolDetailProps {
   side: ReactNode;
   /** The current price and how it moved today, large, under the heading. */
   price: ReactNode;
+  /** The button that opens the ticket for asking a dealer for a quote, beside the watchlist button. */
+  ticket: ReactNode;
 }
 
 /**
@@ -32,7 +34,7 @@ interface SymbolDetailProps {
  * same. Focus moves to its heading when it opens (so a keyboard or screen reader user lands in it) and goes back to
  * where it was when it closes; Escape closes it.
  */
-export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWatchlist, onToggleWatchlist, onClose, takeFocus, children, side, price }: SymbolDetailProps) {
+export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWatchlist, onToggleWatchlist, onClose, takeFocus, children, side, price, ticket }: SymbolDetailProps) {
   const t = useT();
   const { locale } = useIntl();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -66,6 +68,7 @@ export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWat
           <Icon name={inWatchlist ? "minus" : "plus"} />
           {inWatchlist ? t("watchlist.remove") : t("watchlist.add")}
         </button>
+        {ticket}
         <button type="button" className="symbol-detail-close" onClick={onClose}>
           <Icon name="x" />
           {t("chart.close")}

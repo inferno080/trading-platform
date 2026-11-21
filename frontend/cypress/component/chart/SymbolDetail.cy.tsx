@@ -23,6 +23,7 @@ const detail = (overrides: Overrides = {}, handlers: { onClose?: () => void; onT
     takeFocus={overrides.takeFocus ?? false}
     side={<p id="side">the book and trades</p>}
     price={<p id="price">912.76</p>}
+    ticket={<button id="ticket">Request a quote</button>}
   >
     <p id="chart">the chart</p>
   </SymbolDetail>
@@ -181,6 +182,8 @@ describe("SymbolDetail", () => {
       cy.get(".symbol-detail-watch").focus().realPress("Enter");
       cy.get("@toggle").should("have.been.calledOnce");
       cy.realPress("Tab");
+      cy.focused().should("have.id", "ticket");
+      cy.realPress("Tab");
       cy.focused().should("have.class", "symbol-detail-close");
       cy.realPress("Enter");
       cy.get("@close").should("have.been.calledOnce");
@@ -193,5 +196,14 @@ describe("SymbolDetail", () => {
     cy.get("#symbol-detail-title").should("have.text", "AAA の価格チャート");
     cy.get(".symbol-detail-close").should("have.text", "チャートを閉じる");
     cy.get(".symbol-detail-watch").should("have.text", "ウォッチリストに追加");
+  });
+
+  it("puts the ticket's button in the header, between the watchlist button and Close", () => {
+    cy.mount(withI18n(detail()));
+    cy.get(".symbol-detail-header #ticket").should("exist");
+    cy.get(".symbol-detail-header button").then(($buttons) => {
+      const labels = [...$buttons].map((button) => button.textContent?.trim());
+      expect(labels).to.deep.equal(["Add to watchlist", "Request a quote", "Close chart"]);
+    });
   });
 });

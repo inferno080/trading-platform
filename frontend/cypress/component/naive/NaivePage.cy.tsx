@@ -644,4 +644,42 @@ describe("NaivePage: the watchlist", () => {
     cy.get('button[aria-label="Remove AAA from the watchlist"]').focus().realPress("Enter");
     panelItems().should("have.length", 0);
   });
+
+  describe("asking for a quote", () => {
+    const sentMessages = () => socket().sent.map((frame) => decode(frame) as Record<string, unknown> & { t: string });
+    const lastRequest = () => sentMessages().filter((message) => message.t === "rfq").at(-1) as unknown as { ref: number; id: number; side: string; quantity: number };
+
+    it("opens the ticket in a dialog from the open chart's header, sends the request over the page's own connection and shows the quote", () => {
+      goLive();
+      cy.contains(".symbol-detail-header button", "Request a quote").click();
+      cy.get("dialog[open] #rfq-quantity").type("250{enter}");
+      cy.wrap(null).should(() => expect(lastRequest()).to.include({ id: 0, side: "buy", quantity: 250 }));
+      cy.then(() => {
+        const { ref } = lastRequest();
+        socket().receive({ t: "rfqQuote", ref, id: 0, side: "buy", quantity: 250, price: 29925, screenPrice: 29921, validForMs: 10_000 });
+      });
+      cy.get(".rfq-message").should("contain.text", "You buy 250 AAA at 299.25");
+      cy.contains("button", "Accept").click();
+      cy.wrap(null).should(() => expect(sentTypes()).to.include("rfqAccept"));
+      cy.then(() => socket().receive({ t: "rfqResult", ref: lastRequest().ref, outcome: "filled", price: 29925, tradeId: 8 }));
+      cy.get(".rfq-message").should("contain.text", "Done: bought 250 AAA at 299.25");
+    });
+
+    it("fails the request when the connection drops while waiting", () => {
+      goLive();
+      cy.contains("button", "Request a quote").click();
+      cy.get("#rfq-quantity").type("10{enter}");
+      cy.wrap(null).should(() => expect(lastRequest()).to.not.equal(undefined));
+      cy.then(() => socket().drop());
+      cy.get(".rfq-message").should("contain.text", "request was cancelled");
+    });
+
+    it("says the request is lost when the connection is not open", () => {
+      goLive();
+      cy.then(() => (socket().readyState = FakeWebSocket.CLOSED));
+      cy.contains("button", "Request a quote").click();
+      cy.get("#rfq-quantity").type("10{enter}");
+      cy.get(".rfq-message").should("contain.text", "request was cancelled");
+    });
+  });
 });
