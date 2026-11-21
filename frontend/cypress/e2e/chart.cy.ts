@@ -4,7 +4,7 @@ import { NAIVE, waitForChartDrawn, waitForLiveGrid, waitForLiveTable } from "../
 // history is fetched from the server, live prices are folded in, and the panel behaves like the page around it.
 
 const TABS = [
-  { name: "Naive", url: NAIVE, ready: waitForLiveTable, pick: (symbol: string) => cy.contains("tbody tr", symbol).find("button").click() },
+  { name: "Naive", url: NAIVE, ready: waitForLiveTable, pick: (symbol: string) => cy.contains(".table-wrap tbody tr", symbol).find("button").click() },
   { name: "Optimized", url: "/", ready: waitForLiveGrid, pick: (symbol: string) => cy.contains(".ag-row [col-id=sym]", symbol).click() },
 ];
 
@@ -70,6 +70,35 @@ for (const tab of TABS) {
     it("does not move keyboard focus into the chart that opened by itself", () => {
       cy.get("#symbol-detail-title").should("exist");
       cy.get("#symbol-detail-title").should("not.have.focus");
+    });
+
+    it("shows the price, its move since the previous close, and \"Today\" above the chart", () => {
+      cy.get(".symbol-detail .price-now").invoke("text").should("match", /^[\d,]+\.\d\d$/);
+      cy.get(".symbol-detail .price-move").invoke("text").should("match", /^[▲▼] ?[+−-]?\d+\.\d\d%$/);
+      cy.get(".symbol-detail .price-today").invoke("text").should("match", /^\([+−-]?[\d,]+\.\d\d\) Today$/);
+    });
+
+    it("shows a live order book of ten levels a side, best prices first, and the latest trades beside it", () => {
+      cy.get("table.book tbody tr", { timeout: 20000 }).should("have.length", 10);
+      cy.get("table.book tbody tr").first().find("td").then(($cells) => {
+        const [, bid, ask] = [...$cells].map((cell) => Number((cell.textContent ?? "").replace(/,/g, "")));
+        expect(ask, "the best ask is above the best bid").to.be.greaterThan(bid!);
+      });
+      cy.get("table.tape tbody tr", { timeout: 30000 }).should("have.length.greaterThan", 0).and("have.length.at.most", 10);
+      cy.get("table.tape tbody tr").first().invoke("text").should("match", /Buy|Sell/);
+    });
+
+    it("keeps the order book live", () => {
+      cy.get("table.book tbody", { timeout: 20000 }).invoke("text").then((before) => {
+        cy.get("table.book tbody", { timeout: 20000 }).should(($tbody) => expect($tbody.text()).not.to.equal(before));
+      });
+    });
+
+    it("replaces the order book when another chart is opened, and its skeleton never shows the old symbol's prices", () => {
+      cy.get("table.book tbody tr", { timeout: 20000 }).should("have.length", 10);
+      tab.pick("AAB");
+      cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
+      cy.get("table.book tbody tr", { timeout: 20000 }).should("have.length", 10);
     });
 
     it("is drawn in the dark theme's colors when the theme is switched", () => {

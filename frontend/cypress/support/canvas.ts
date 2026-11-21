@@ -10,13 +10,13 @@ export function makeCanvas(width: number, height: number): { canvas: HTMLCanvasE
 
 /** Pure colors, easy to tell apart when counting pixels. */
 export const TEST_COLORS: ChartColors = {
-  line: "rgb(255, 0, 0)",
+  line: "rgb(255, 128, 0)",
   grid: "rgb(0, 0, 255)",
   text: "rgb(0, 0, 0)",
   muted: "rgb(0, 0, 0)",
   background: "rgb(255, 255, 255)",
   up: "rgb(0, 255, 0)",
-  down: "rgb(255, 0, 0)",
+  down: "rgb(255, 0, 255)",
 };
 
 /** How many pixels are (nearly) this color, ignoring anti-aliased edges. */

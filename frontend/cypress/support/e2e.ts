@@ -33,7 +33,7 @@ export function emulateMedia(features: { name: string; value: string }[]): void 
 export function waitForLiveTable(): void {
   // Checks the status attribute, not the word "Live", so it works in every language.
   cy.get(".status", { timeout: 20000 }).should("have.attr", "data-status", "live");
-  cy.get("tbody tr", { timeout: 20000 }).should("have.length.greaterThan", 10);
+  cy.get(".table-wrap tbody tr", { timeout: 20000 }).should("have.length.greaterThan", 10);
 }
 
 /** Wait until the Optimized tab is live and its grid has rows. */

@@ -11,7 +11,7 @@ const falling = data(Array.from({ length: 60 }, (_, i) => 30000 - i * 5));
 const send = (store: FeedStore, values: Float64Array, id = ID) => store.setCharts([{ id, data: values }]);
 
 const miniElement = (store: FeedStore, options: { refreshMs?: number; frozen?: boolean } = {}) =>
-  withI18n(<OptimizedMiniChart store={store} id={ID} symbol="AAB" decimals={2} refreshMs={options.refreshMs ?? 0} frozen={options.frozen ?? false} />);
+  withI18n(<OptimizedMiniChart store={store} id={ID} symbol="AAB" decimals={2} prevClose={30000} refreshMs={options.refreshMs ?? 0} frozen={options.frozen ?? false} />);
 const mountMini = (store = new FeedStore(), options: { refreshMs?: number; frozen?: boolean } = {}) => {
   cy.mount(miniElement(store, options));
   return store;
@@ -34,13 +34,16 @@ describe("OptimizedMiniChart", () => {
     cy.get("canvas.mini-canvas").should(($c) => expect(countInk($c[0] as HTMLCanvasElement)).to.be.greaterThan(50));
   });
 
-  it("writes the newest price and how far it moved, with an arrow, and colors it by direction", () => {
+  it("shows the newest price, large, with the move since the previous close, colored by direction", () => {
     const store = mountMini();
-    cy.then(() => send(store, climbing));
-    cy.get(".mini-caption").should("contain.text", "302.95").and("contain.text", "▲").and("contain.text", "+0.98%");
-    cy.get(".mini-caption").should("have.attr", "data-direction", "1");
-    cy.then(() => send(store, falling));
-    cy.get(".mini-caption").should("contain.text", "▼").and("have.attr", "data-direction", "-1");
+    cy.then(() => send(store, climbing)); // newest 302.95 against a previous close of 300.00
+    cy.get(".price-line-small .price-now").should("have.text", "302.95");
+    cy.get(".price-line-small .price-move").should("contain.text", "▲").and("contain.text", "+0.98%");
+    cy.get(".price-line-small .price-today").should("contain.text", "(+2.95)").and("contain.text", "Today");
+    cy.get(".price-line-small").should("have.attr", "data-direction", "1");
+    cy.then(() => send(store, falling)); // newest 297.05
+    cy.get(".price-line-small .price-move").should("contain.text", "▼");
+    cy.get(".price-line-small").should("have.attr", "data-direction", "-1");
   });
 
   it("describes the chart in words for assistive technology", () => {
@@ -66,11 +69,11 @@ describe("OptimizedMiniChart", () => {
     const store = mountMini(new FeedStore(), { refreshMs: 1500 });
     cy.then(() => send(store, climbing));
     cy.get("canvas.mini-canvas").should("have.attr", "data-ready", "true");
-    cy.get(".mini-caption").should("have.attr", "data-direction", "1");
+    cy.get(".price-line-small").should("have.attr", "data-direction", "1");
     cy.then(() => send(store, falling));
     afterFrames(20);
-    cy.get(".mini-caption").should("have.attr", "data-direction", "1"); // not yet
-    cy.get(".mini-caption", { timeout: 5000 }).should("have.attr", "data-direction", "-1");
+    cy.get(".price-line-small").should("have.attr", "data-direction", "1"); // not yet
+    cy.get(".price-line-small", { timeout: 5000 }).should("have.attr", "data-direction", "-1");
   });
 
   it("holds still while frozen, and catches up when unfrozen", () => {

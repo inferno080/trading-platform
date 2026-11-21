@@ -273,10 +273,10 @@ const live = () => {
 describe("FeedConnection: the open chart", () => {
   const charts = (batch: ReturnType<ReturnType<typeof setup>["lastBatch"]>) => batch.charts ?? [];
 
-  it("asks for the history of the selected instrument", () => {
+  it("asks for the history of the selected instrument, and subscribes to it, so the server sends its order book and trades", () => {
     const { connection } = live();
     connection.select(1);
-    expect(sentRequests()).to.deep.equal(["history 1"]);
+    expect(sentRequests()).to.deep.equal(["history 1", "subscribe 1"]);
   });
 
   it("waits for the connection to open before asking, and asks when it does", () => {
@@ -285,14 +285,14 @@ describe("FeedConnection: the open chart", () => {
     connection.select(2);
     expect(sentRequests()).to.deep.equal([]);
     FakeWebSocket.latest.open();
-    expect(sentRequests()).to.deep.equal(["history 2"]);
+    expect(sentRequests()).to.deep.equal(["history 2", "subscribe 2"]);
   });
 
   it("does not ask twice for the same instrument", () => {
     const { connection } = live();
     connection.select(1);
     connection.select(1);
-    expect(sentRequests()).to.deep.equal(["history 1"]);
+    expect(sentRequests()).to.deep.equal(["history 1", "subscribe 1"]);
   });
 
   it("sends the history to the page with the next pull, as a flat typed list, and not again until it changes", () => {
@@ -348,7 +348,7 @@ describe("FeedConnection: the open chart", () => {
     FakeWebSocket.latest.receive(makeHistory(1));
     lastBatch();
     connection.select(2);
-    expect(sentRequests()).to.deep.equal(["history 1", "history 2"]);
+    expect(sentRequests()).to.deep.equal(["history 1", "subscribe 1", "history 2", "unsubscribe 1", "subscribe 2"]);
     FakeWebSocket.latest.receive({ ...makeDelta(6, [makeUpdate(1, { last: 31000 })]), ts: 1 }); // the old one no longer follows
     expect(charts(lastBatch())).to.have.length(0);
   });
@@ -358,7 +358,7 @@ describe("FeedConnection: the open chart", () => {
     connection.select(1);
     connection.select(null);
     connection.select(1);
-    expect(sentRequests()).to.deep.equal(["history 1", "history 1"]);
+    expect(sentRequests()).to.deep.equal(["history 1", "subscribe 1", "unsubscribe 1", "history 1", "subscribe 1"]);
   });
 
   it("says so when the server has no history for the selected instrument", () => {
@@ -381,7 +381,7 @@ describe("FeedConnection: the open chart", () => {
     connection.select(1);
     connection.connect("ws://localhost:2");
     FakeWebSocket.latest.open();
-    expect(sentRequests()).to.deep.equal(["history 1"]); // on the new socket
+    expect(sentRequests()).to.deep.equal(["history 1", "subscribe 1"]); // on the new socket
   });
 
   it("sends a copy of the chart, so a later update cannot change what the page already has", () => {
@@ -477,5 +477,116 @@ describe("FeedConnection: the watchlist", () => {
     FakeWebSocket.latest.receive(makeTrades(1));
     expect(events).to.have.length(0);
     expect(lastBatch().updates).to.have.length(0);
+  });
+});
+
+describe("FeedConnection: the open instrument's order book and trades", () => {
+  const depthOf = (id: number, bid: number) => ({ ...makeDepth(id), bids: [[bid, 2700]] as [number, number][] });
+  const tradesOf = (id: number, ...prices: number[]) => ({
+    ...makeTrades(id),
+    trades: prices.map((price, i) => ({ ts: i, price, size: 300, side: "buy" as const })),
+  });
+
+  it("sends the open instrument's order book with the next pull", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(depthOf(1, 29917));
+    const batch = lastBatch();
+    expect(batch.depth).to.deep.equal({ id: 1, bids: [[29917, 2700]], asks: [[29921, 3500]] });
+  });
+
+  it("keeps only the newest order book between pulls (conflation: the whole ladder is sent each time, so the last one is all that matters)", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(depthOf(1, 100));
+    FakeWebSocket.latest.receive(depthOf(1, 101));
+    FakeWebSocket.latest.receive(depthOf(1, 102));
+    expect(lastBatch().depth?.bids[0]?.[0]).to.equal(102);
+  });
+
+  it("does not send the same order book twice", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(depthOf(1, 100));
+    lastBatch();
+    expect(lastBatch().depth).to.equal(undefined);
+  });
+
+  it("collects the open instrument's trades between pulls, oldest first, and sends them once", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(tradesOf(1, 100, 101));
+    FakeWebSocket.latest.receive(tradesOf(1, 102));
+    const batch = lastBatch();
+    expect(batch.trades?.id).to.equal(1);
+    expect(batch.trades?.trades.map((t) => t.price)).to.deep.equal([100, 101, 102]);
+    expect(lastBatch().trades).to.equal(undefined);
+  });
+
+  it("sends neither when nothing arrived", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    const batch = lastBatch();
+    expect(batch.depth).to.equal(undefined);
+    expect(batch.trades).to.equal(undefined);
+  });
+
+  it("ignores the order book and trades of the watchlist's symbols, which are subscribed to but not shown", () => {
+    const { connection, lastBatch } = live();
+    connection.watch([2]);
+    connection.select(1);
+    FakeWebSocket.latest.receive(depthOf(2, 100));
+    FakeWebSocket.latest.receive(tradesOf(2, 100));
+    const batch = lastBatch();
+    expect(batch.depth).to.equal(undefined);
+    expect(batch.trades).to.equal(undefined);
+  });
+
+  it("ignores them when nothing is open", () => {
+    const { connection, lastBatch } = live();
+    connection.watch([2]);
+    FakeWebSocket.latest.receive(depthOf(2, 100));
+    FakeWebSocket.latest.receive(tradesOf(2, 100));
+    expect(lastBatch().depth).to.equal(undefined);
+  });
+
+  it("drops what was waiting when another instrument is opened, so the old one's book never shows under the new one", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(depthOf(1, 100));
+    FakeWebSocket.latest.receive(tradesOf(1, 100));
+    connection.select(2);
+    const batch = lastBatch();
+    expect(batch.depth).to.equal(undefined);
+    expect(batch.trades).to.equal(undefined);
+  });
+
+  it("starts empty after the connection is replaced", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(depthOf(1, 100));
+    FakeWebSocket.latest.receive(tradesOf(1, 100));
+    connection.connect("ws://localhost:2");
+    const batch = lastBatch();
+    expect(batch.depth).to.equal(undefined);
+    expect(batch.trades).to.equal(undefined);
+  });
+
+  it("subscribes to the open instrument as well as the watchlist, and unsubscribes only once it is neither", () => {
+    const { connection } = live();
+    connection.watch([1]);
+    connection.select(1); // both: still one subscription
+    expect(sentRequests().filter((r) => r === "subscribe 1")).to.have.length(1);
+    connection.select(null); // still on the watchlist
+    expect(sentRequests()).not.to.include("unsubscribe 1");
+    connection.watch([]); // now neither
+    expect(sentRequests()).to.include("unsubscribe 1");
+  });
+
+  it("subscribes to up to five instruments at once: four on the watchlist and the open one, the most the server allows", () => {
+    const { connection } = live();
+    connection.watch([1, 2, 3, 4]);
+    connection.select(5);
+    expect(sentRequests().filter((r) => r.startsWith("subscribe"))).to.have.length(5);
   });
 });

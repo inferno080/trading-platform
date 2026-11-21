@@ -6,7 +6,7 @@ const rising = series(300, (i) => 30000 + i * 2);
 const chartElement = (data: number[] | null, unavailable = false) =>
   withI18n(
     <>
-      <NaiveChart symbol="AAA" decimals={2} data={data} unavailable={unavailable} />
+      <NaiveChart symbol="AAA" decimals={2} prevClose={29800} data={data} unavailable={unavailable} />
       <p id="elsewhere">elsewhere</p>
     </>,
   );

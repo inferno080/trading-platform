@@ -64,7 +64,7 @@ describe("language", () => {
     cy.get("h1").should("have.text", "取引ダッシュボード");
     cy.title().should("equal", "取引ダッシュボード");
     cy.get("#tab-naive").should("have.text", "ナイーブ");
-    cy.get("thead th").first().should("have.text", "銘柄");
+    cy.get(".table-wrap thead th").first().should("have.text", "銘柄");
     cy.get(".status").should("contain.text", "ライブ");
   });
 

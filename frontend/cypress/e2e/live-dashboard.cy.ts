@@ -14,7 +14,7 @@ describe("the live dashboard", () => {
   it("shows the reference data and readable prices for the first instrument", () => {
     cy.visit(NAIVE);
     waitForLiveTable();
-    cy.get("tbody tr").first().find("td").then(($cells) => {
+    cy.get(".table-wrap tbody tr").first().find("td").then(($cells) => {
       // The data cells after the symbol, in column order.
       const columns = ["name", "currency", "bid", "ask", "spread", "last", "prevClose", "change", "bidSize", "askSize", "volume"] as const;
       const row = Object.fromEntries(columns.map((column, index) => [column, $cells[index]?.textContent ?? ""])) as Record<(typeof columns)[number], string>;
@@ -34,7 +34,7 @@ describe("the live dashboard", () => {
   it("prices every kind of instrument with its own number of decimals", () => {
     cy.visit(NAIVE);
     waitForLiveTable();
-    cy.get("tbody tr").then(($rows) => {
+    cy.get(".table-wrap tbody tr").then(($rows) => {
       // Columns: symbol (th), then name, currency, bid, ask, spread, last, prev close, chg, sizes, volume.
       const seen = new Set<string>();
       for (const row of $rows) {
@@ -56,8 +56,8 @@ describe("the live dashboard", () => {
   it("keeps updating as the feed streams", () => {
     cy.visit(NAIVE);
     waitForLiveTable();
-    cy.get("tbody").invoke("text").then((before) => {
-      cy.get("tbody", { timeout: 15000 }).should(($tbody) => expect($tbody.text()).not.to.equal(before));
+    cy.get(".table-wrap tbody").invoke("text").then((before) => {
+      cy.get(".table-wrap tbody", { timeout: 15000 }).should(($tbody) => expect($tbody.text()).not.to.equal(before));
     });
   });
 

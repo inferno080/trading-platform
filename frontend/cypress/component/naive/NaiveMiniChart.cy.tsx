@@ -4,7 +4,7 @@ import { withI18n } from "../../support/render";
 
 const climbing = series(60, (i) => 30000 + i * 5);
 const falling = series(60, (i) => 30000 - i * 5);
-const mini = (data: number[] | undefined) => withI18n(<NaiveMiniChart symbol="AAB" decimals={2} data={data} />);
+const mini = (data: number[] | undefined) => withI18n(<NaiveMiniChart symbol="AAB" decimals={2} prevClose={29800} data={data} />);
 
 describe("NaiveMiniChart", () => {
   it("shows a small skeleton, announced as loading, until its data arrives", () => {
@@ -22,16 +22,29 @@ describe("NaiveMiniChart", () => {
     cy.get("canvas.mini-canvas").should(($c) => expect(countInk($c[0] as HTMLCanvasElement)).to.be.greaterThan(50));
   });
 
-  it("writes the newest price and how far it moved, with an arrow, and colors it by direction", () => {
-    cy.mount(mini(climbing));
-    cy.get(".mini-caption").should("contain.text", "302.95").and("contain.text", "▲").and("have.attr", "data-direction", "1");
-    cy.mount(mini(falling));
-    cy.get(".mini-caption").should("contain.text", "▼").and("have.attr", "data-direction", "-1");
+  it("shows the newest price, large, with how far it moved since the previous close and the amount, and Today", () => {
+    cy.mount(mini(climbing)); // newest 302.95 against a previous close of 298.00
+    cy.get(".price-line-small .price-now").should("have.text", "302.95");
+    cy.get(".price-line-small .price-move").should("contain.text", "▲").and("contain.text", "+1.66%");
+    cy.get(".price-line-small .price-today").should("contain.text", "(+4.95)").and("contain.text", "Today");
+    cy.get(".price-line-small").should("have.attr", "data-direction", "1");
   });
 
-  it("has an empty caption until there is data", () => {
+  it("shows a fall against the previous close in the down direction", () => {
+    cy.mount(mini(falling)); // newest 297.05
+    cy.get(".price-line-small .price-now").should("have.text", "297.05");
+    cy.get(".price-line-small .price-move").should("contain.text", "▼").and("contain.text", "0.32%");
+    cy.get(".price-line-small").should("have.attr", "data-direction", "-1");
+  });
+
+  it("has an empty price line, which keeps its height, until there is data", () => {
     cy.mount(mini(undefined));
-    cy.get(".mini-caption").should("have.text", "").and("have.attr", "data-direction", "0");
+    cy.get(".price-line-small").should("have.text", "").and("have.attr", "data-direction", "0");
+  });
+
+  it("draws a faint dotted line at the previous close", () => {
+    cy.mount(mini(climbing));
+    cy.get("canvas.mini-canvas").should(($c) => expect(countInk($c[0] as HTMLCanvasElement)).to.be.greaterThan(50));
   });
 
   it("describes the chart in words for assistive technology", () => {

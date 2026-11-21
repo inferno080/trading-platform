@@ -17,7 +17,7 @@ interface Options {
 const chartElement = (store: FeedStore, { unavailable = false, refreshMs = 0, frozen = false }: Options = {}) =>
   withI18n(
     <>
-      <OptimizedChart store={store} id={ID} symbol="AAA" decimals={2} unavailable={unavailable} refreshMs={refreshMs} frozen={frozen} />
+      <OptimizedChart store={store} id={ID} symbol="AAA" decimals={2} prevClose={29800} unavailable={unavailable} refreshMs={refreshMs} frozen={frozen} />
       <p id="elsewhere">elsewhere</p>
     </>,
   );
@@ -149,7 +149,7 @@ describe("OptimizedChart", () => {
 
   describe("the theme", () => {
     it("redraws in the new colors when the theme changes", () => {
-      document.documentElement.style.setProperty("--color-accent", "rgb(255, 0, 0)");
+      document.documentElement.style.setProperty("--color-up", "rgb(255, 0, 0)"); // the line is the up color when the price is above the previous close
       const store = mountChart();
       cy.then(() => send(store, rising()));
       cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
@@ -163,11 +163,11 @@ describe("OptimizedChart", () => {
           return count;
         };
         expect(red(), "red line before").to.be.greaterThan(100);
-        document.documentElement.style.setProperty("--color-accent", "rgb(0, 0, 255)");
+        document.documentElement.style.setProperty("--color-up", "rgb(0, 0, 255)");
         document.documentElement.setAttribute("data-theme", "dark");
         cy.wrap(null).should(() => expect(red(), "red line after").to.be.lessThan(20));
         cy.then(() => {
-          document.documentElement.style.removeProperty("--color-accent");
+          document.documentElement.style.removeProperty("--color-up");
           document.documentElement.removeAttribute("data-theme");
         });
       });

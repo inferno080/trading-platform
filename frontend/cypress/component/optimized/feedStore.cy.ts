@@ -1,4 +1,4 @@
-import { FeedStore, STALE_AFTER_MS, type RowsChange } from "../../../src/optimized/feedStore";
+import { FeedStore, STALE_AFTER_MS, TAPE_LENGTH, type RowsChange } from "../../../src/optimized/feedStore";
 import { makeQuote, makeReference, makeReferenceData, makeSnapshot } from "../../support/fixtures";
 
 // A store with everything it needs to show rows, and a list of the changes it announced.
@@ -259,5 +259,65 @@ describe("FeedStore: looking things up", () => {
     expect(store.instrument(2)?.name).to.equal("Cobalt Capital Inc.");
     expect(store.instrument(99)).to.equal(undefined);
     expect(new FeedStore().instrument(0)).to.equal(undefined);
+  });
+});
+
+describe("FeedStore: the open instrument's order book and trades", () => {
+  const book = (bid: number) => ({ id: 1, bids: [[bid, 1000]] as [number, number][], asks: [[bid + 4, 2000]] as [number, number][] });
+  const trade = (n: number) => ({ ts: n, price: 29900 + n, size: 100, side: "buy" as const });
+
+  it("has no order book and an empty tape to begin with", () => {
+    const store = new FeedStore();
+    expect(store.book).to.equal(null);
+    expect(store.tape).to.deep.equal([]);
+  });
+
+  it("holds the newest order book, which replaces the last, and tells listeners", () => {
+    const store = new FeedStore();
+    let heard = 0;
+    store.subscribeBook(() => heard++);
+    store.setBook(book(29917));
+    store.setBook(book(30000));
+    expect(store.book?.bids[0]?.[0]).to.equal(30000);
+    expect(heard).to.equal(2);
+  });
+
+  it("puts new trades at the front of the tape, newest first, though the worker sends them oldest first", () => {
+    const store = new FeedStore();
+    store.addTrades({ id: 1, trades: [trade(1), trade(2), trade(3)] });
+    expect(store.tape.map((t) => t.ts)).to.deep.equal([3, 2, 1]);
+    store.addTrades({ id: 1, trades: [trade(4)] });
+    expect(store.tape.map((t) => t.ts)).to.deep.equal([4, 3, 2, 1]);
+  });
+
+  it("keeps only the thirty most recent trades", () => {
+    expect(TAPE_LENGTH).to.equal(30);
+    const store = new FeedStore();
+    for (let i = 0; i < 50; i++) store.addTrades({ id: 1, trades: [trade(i)] });
+    expect(store.tape).to.have.length(30);
+    expect(store.tape[0]?.ts).to.equal(49);
+    expect(store.tape.at(-1)?.ts).to.equal(20);
+  });
+
+  it("forgets the order book and the tape when cleared, and tells listeners", () => {
+    const store = new FeedStore();
+    store.setBook(book(29917));
+    store.addTrades({ id: 1, trades: [trade(1)] });
+    let heard = 0;
+    store.subscribeBook(() => heard++);
+    store.clearBook();
+    expect(store.book).to.equal(null);
+    expect(store.tape).to.deep.equal([]);
+    expect(heard).to.equal(1);
+  });
+
+  it("stops telling a listener that unsubscribed", () => {
+    const store = new FeedStore();
+    let heard = 0;
+    const unsubscribe = store.subscribeBook(() => heard++);
+    store.setBook(book(1));
+    unsubscribe();
+    store.setBook(book(2));
+    expect(heard).to.equal(1);
   });
 });

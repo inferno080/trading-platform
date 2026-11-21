@@ -102,6 +102,6 @@ describe("the Optimized tab, with the real worker and server", () => {
     waitForLiveGrid();
     cy.get("#tab-naive").click();
     cy.get(".optimized-page").should("not.exist");
-    cy.get("tbody tr", { timeout: 20000 }).should("have.length.greaterThan", 10); // Naive has its own connection
+    cy.get(".table-wrap tbody tr", { timeout: 20000 }).should("have.length.greaterThan", 10); // Naive has its own connection
   });
 });
