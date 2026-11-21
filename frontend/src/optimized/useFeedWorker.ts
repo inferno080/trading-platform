@@ -111,6 +111,8 @@ export function useFeedWorker(selectedId: number | null = null, watchlist: numbe
         collector.onBatch(message.stats);
         store.applyBatch(message.updates, Date.now());
         if (message.charts) store.setCharts(message.charts);
+        if (message.depth) store.setBook(message.depth);
+        if (message.trades) store.addTrades(message.trades);
       }
       setState((previous) => reduceWorkerEvent(previous, message));
     };
@@ -153,8 +155,9 @@ export function useFeedWorker(selectedId: number | null = null, watchlist: numbe
   // longer are, so one that comes back starts from its skeleton again.
   useEffect(() => {
     selected.current = selectedId;
+    store.clearBook(); // the old instrument's order book and trades are not the new one's
     worker.current?.postMessage({ type: "select", id: selectedId });
-  }, [selectedId]);
+  }, [selectedId, store]);
   useEffect(() => {
     watched.current = watchlist;
     worker.current?.postMessage({ type: "watch", ids: watchlist });

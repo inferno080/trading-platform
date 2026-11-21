@@ -8,7 +8,7 @@ const TABS = [
     name: "Naive",
     url: NAIVE,
     ready: waitForLiveTable,
-    pick: (symbol: string) => cy.contains("tbody tr", symbol).find("button").click(),
+    pick: (symbol: string) => cy.contains(".table-wrap tbody tr", symbol).find("button").click(),
     quotesWidth: () => cy.get(".table-wrap"),
   },
   {
@@ -33,13 +33,13 @@ for (const tab of TABS) {
       tab.ready();
     });
 
-    it("starts empty, open, beside the quotes", () => {
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (0)").and("have.attr", "aria-expanded", "true");
+    it("starts empty and open, beside the chart of the first symbol", () => {
+      cy.get(".watchlist-toggle").should("have.text", "Watchlist").and("have.attr", "aria-expanded", "true");
       cy.get(".watchlist-empty").should("exist");
-      cy.get(".workspace").should("have.attr", "data-watchlist", "open");
+      cy.get(".workspace").should("have.attr", "data-watchlist", "open").and("have.attr", "data-main", "chart");
     });
 
-    it("puts the quotes and the watchlist side by side, 70% and 30%", () => {
+    it("puts the chart and the watchlist side by side, 70% and 30%, with the quotes full width below", () => {
       cy.get(".workspace-main").then(($main) => {
         cy.get(".workspace-side").then(($side) => {
           const main = $main[0]!.getBoundingClientRect().width;
@@ -47,14 +47,23 @@ for (const tab of TABS) {
           expect(main / (main + side)).to.be.within(0.69, 0.71);
         });
       });
+      cy.get(".workspace").then(($row) => {
+        tab.quotesWidth().then(($quotes) => {
+          const quotes = $quotes[0]!.getBoundingClientRect();
+          expect(quotes.top, "the quotes are below").to.be.at.least($row[0]!.getBoundingClientRect().bottom - 1);
+          expect(quotes.width, "and full width").to.be.closeTo($row[0]!.getBoundingClientRect().width, 2);
+        });
+      });
     });
 
     it("adds a symbol from its chart, shows a mini chart filled from real history, and keeps it live", () => {
       addToWatchlist(tab, "AAA");
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (1)");
-      items().should("have.length", 1).first().should("contain.text", "AAA");
+      cy.get(".watchlist-toggle").should("have.text", "Watchlist");
+      cy.get("#watchlist-title").should("contain.text", "1 of 4");
+      items().should("have.length", 1).first().should("contain.text", "(AAA)");
       items().first().find('canvas.mini-canvas[data-ready="true"]', { timeout: 30000 }).should("exist");
-      items().first().find(".mini-caption").invoke("text").should("match", /^[\d,]+\.\d\d {2}[▲▼]? ?[+−-]?\d+\.\d\d%$/);
+      items().first().find(".price-now").invoke("text").should("match", /^[\d,]+\.\d\d$/);
+      items().first().find(".price-move").invoke("text").should("match", /^[▲▼] ?[+−-]?\d+\.\d\d%$/);
       cy.contains("button", "Remove from watchlist").should("exist");
     });
 
@@ -81,17 +90,17 @@ for (const tab of TABS) {
     it("opens a symbol's chart from its watchlist entry", () => {
       addToWatchlist(tab, "AAC");
       cy.contains("button", "Close chart").click();
-      cy.get('button[aria-label="Open the AAC chart"]').click();
+      cy.get('button[aria-label$="(AAC) chart"]').click();
       cy.get("#symbol-detail-title").should("have.text", "AAC price chart");
       waitForChartDrawn();
     });
 
-    it("collapses, giving the quotes the whole width, and expands again", () => {
-      tab.quotesWidth().then(($quotes) => {
-        const open = $quotes[0]!.getBoundingClientRect().width;
+    it("collapses, giving the chart the whole width, and expands again", () => {
+      cy.get(".workspace-main").then(($chart) => {
+        const open = $chart[0]!.getBoundingClientRect().width;
         cy.get(".watchlist-toggle").click();
         cy.get(".watchlist").should("not.exist");
-        tab.quotesWidth().should(($q) => expect($q[0]!.getBoundingClientRect().width).to.be.greaterThan(open * 1.3));
+        cy.get(".workspace-main").should(($c) => expect($c[0]!.getBoundingClientRect().width).to.be.greaterThan(open * 1.3));
         cy.get(".watchlist-toggle").click();
         cy.get(".watchlist").should("exist");
       });
@@ -104,7 +113,8 @@ for (const tab of TABS) {
       cy.reload();
       tab.ready();
       cy.get(".workspace").should("have.attr", "data-watchlist", "closed");
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (2)").click();
+      cy.get(".watchlist-toggle").should("have.text", "Watchlist").click();
+      cy.get("#watchlist-title").should("contain.text", "2 of 4");
       items().should("have.length", 2);
       items().first().find('canvas.mini-canvas[data-ready="true"]', { timeout: 30000 }).should("exist");
     });

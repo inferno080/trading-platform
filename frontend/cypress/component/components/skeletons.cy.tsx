@@ -1,4 +1,5 @@
 import {
+  BookSkeleton,
   ChartSkeleton,
   MiniChartLoading,
   MiniChartSkeleton,
@@ -15,6 +16,15 @@ describe("TableSkeleton", () => {
   });
 });
 
+describe("BookSkeleton", () => {
+  it("announces loading once, and has the order book and the trades as two blocks of ten rows", () => {
+    cy.mount(withI18n(<BookSkeleton />));
+    cy.get("[role=status] .visually-hidden").should("have.text", "Loading the order book");
+    cy.get(".book-panel > div").should("have.length", 2);
+    cy.get(".book-panel svg.skeleton").should("have.length", 4);
+  });
+});
+
 describe("PageSkeleton", () => {
   it("announces loading once to screen readers instead of reading the shapes", () => {
     cy.mount(withI18n(<PageSkeleton />));
@@ -22,13 +32,23 @@ describe("PageSkeleton", () => {
     cy.get("[role=status] .visually-hidden").should("have.text", "Loading");
   });
 
-  it("has the shape of the real page: toolbar, performance panel, chart panel, then the quotes beside the watchlist", () => {
+  it("has the shape of the real page: toolbar, performance panel, the chart panel beside the watchlist, then the quotes below", () => {
     cy.mount(withI18n(<PageSkeleton />));
     cy.get(".hud svg.skeleton").should("exist");
-    cy.get(".symbol-detail svg.skeleton").should("have.length", 2); // the heading line, and the chart
-    cy.get(".workspace[data-watchlist=open] .workspace-main .skeleton-frame").should("exist");
+    cy.get(".workspace[data-watchlist=open][data-main=chart] .workspace-main .symbol-detail").should("exist");
+    cy.get(".workspace-main .symbol-detail svg.skeleton").should("have.length", 6); // heading, chart, and the order book and trades (two each)
     cy.get(".workspace-side .watchlist .watch-item").should("have.length", 2);
     cy.get(".workspace-side .watch-item svg.skeleton").should("have.length", 4); // symbol row and mini chart, twice
+    cy.get(".workspace").next(".skeleton-frame").should("exist"); // the table's skeleton, below the row, outside it
+  });
+
+  it("puts the table skeleton across the full width, wider than the chart panel above it", () => {
+    cy.mount(withI18n(<PageSkeleton />));
+    cy.get(".workspace-main").then(($main) => {
+      cy.get(".workspace").next(".skeleton-frame").then(($table) => {
+        expect($table[0]!.getBoundingClientRect().width).to.be.greaterThan($main[0]!.getBoundingClientRect().width + 100);
+      });
+    });
   });
 
   it("lays the quotes and the watchlist out 70% and 30%, like the real page, so nothing jumps when it is replaced", () => {
@@ -75,11 +95,13 @@ describe("MiniChartLoading", () => {
 });
 
 describe("SymbolDetailSkeleton", () => {
-  it("is a panel with a heading line and a chart, announced once as loading", () => {
+  it("is a panel with a heading line, a chart, and the order book and trades below it, announced once as loading", () => {
     cy.mount(withI18n(<SymbolDetailSkeleton />));
     cy.get("section.symbol-detail[role=status]").should("exist");
     cy.get(".visually-hidden").should("have.text", "Loading price history");
-    cy.get("svg.skeleton").should("have.length", 2);
+    cy.get("svg.skeleton").should("have.length", 6);
+    cy.get(".symbol-detail-chart svg.skeleton").should("have.length", 1);
+    cy.get(".symbol-detail-side .book-panel > div").should("have.length", 2); // the order book and the trades, side by side
   });
 
   it("uses colors that stay visible on the panel's own background", () => {

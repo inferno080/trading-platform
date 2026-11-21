@@ -55,9 +55,10 @@ h2 {
 
 button,
 select {
-  min-height: 32px; /* comfortably above the 24px minimum target size (WCAG 2.5.8) */
+  min-height: 28px; /* above the 24px minimum target size (WCAG 2.5.8) */
   padding: 0 var(--space-3);
   font: inherit;
+  font-size: 0.875rem; /* 14px: controls are smaller than the body text around them */
   color: var(--color-text);
   background: var(--color-surface-strong);
   border: 1px solid var(--color-border);
@@ -131,6 +132,7 @@ select:hover {
 }
 .tabs [role="tab"] {
   min-height: 40px;
+  font-size: 1rem; /* the tabs stay at full size: they are the page's main navigation */
   padding: 0 var(--space-4);
   background: transparent;
   border: 0;
@@ -436,6 +438,15 @@ td:first-child,
 .symbol-detail-close {
   margin-inline-start: auto;
 }
+/* The chart across the full width, with the order book and the trades tape side by side below it. */
+.symbol-detail-body {
+  display: grid;
+  gap: var(--space-4);
+}
+.symbol-detail-chart,
+.symbol-detail-side {
+  min-width: 0;
+}
 .chart-area {
   position: relative;
   height: 240px;
@@ -492,16 +503,21 @@ tbody tr {
   cursor: pointer;
 }
 
-/* Workspace: the quotes (70%) and the watchlist (30%) side by side; collapsed, the quotes take it all. On a narrow screen
-   the watchlist goes below the quotes, because 30% of it would be too small to use. */
+/* Workspace: the open chart panel (70%) beside the watchlist (30%), above the quotes, which have the full width. With no
+   chart open the watchlist has the whole row, its cards side by side; collapsed, the chart panel has the row. On a narrow
+   screen they stack. */
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
   gap: var(--space-4);
   align-items: start;
 }
-.workspace[data-watchlist="closed"] {
+.workspace[data-watchlist="closed"],
+.workspace[data-main="empty"] {
   grid-template-columns: minmax(0, 1fr);
+}
+.workspace[data-main="empty"] .watchlist-items {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 @media (max-width: 900px) {
   .workspace {
@@ -541,45 +557,120 @@ tbody tr {
   list-style: none;
 }
 .watch-item {
+  position: relative; /* the open button stretches over the whole tile */
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+  cursor: pointer;
+}
+.watch-item:hover {
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg));
+  border-color: var(--color-text-muted);
+}
+/* The focus ring goes round the whole tile, since the whole tile is what the button opens. */
+.watch-item:has(.watch-open:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 .watch-item-header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-2); /* a little room between the symbol row and the price and chart below it */
+  margin-bottom: var(--space-2); /* a little room between the name row and the price and chart below it */
 }
+/* The name and symbol are the button that opens the chart. Its ::after covers the tile, so a click anywhere on it opens it. */
 .watch-open {
-  font-weight: 600;
-}
-.watch-name {
   flex: 1;
   min-width: 0;
+  min-height: 24px;
+  padding: 0;
   overflow: hidden;
-  font-size: 0.8125rem;
-  color: var(--color-text-muted);
+  font-weight: 600;
+  text-align: start;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: none;
+  border: 0;
 }
+.watch-open:hover:not(:disabled) {
+  border: 0;
+}
+.watch-open:focus-visible {
+  outline: none; /* shown on the tile instead */
+}
+.watch-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* The remove button sits above that cover, so it can still be pressed on its own. */
 .watch-remove {
-  min-width: 24px;
-  min-height: 24px;
-  padding: 0 var(--space-1);
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center; /* the cross sits in the middle of its square */
+  flex: none;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
 }
-.mini-caption {
+.watch-remove .icon {
   display: block;
-  min-height: 1.25em;
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
 }
-.mini-caption[data-direction="1"] {
+.symbol-detail-price {
+  margin-bottom: var(--space-3);
+}
+/* The price, then how it moved today (see components/PriceLine.tsx). */
+.price-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+  min-height: 1.4em; /* keeps its height before there is data, so nothing jumps */
+  font-variant-numeric: tabular-nums;
+}
+.price-now,
+.price-move,
+.price-change {
+  font-family: var(--font-mono);
+}
+.price-now {
+  font-weight: 700;
+}
+/* The price and its move are colored together: green when up on the day, red when down. */
+.price-line[data-direction="1"] .price-now,
+.price-line[data-direction="1"] .price-move,
+.price-line[data-direction="1"] .price-change {
   color: var(--color-up);
 }
-.mini-caption[data-direction="-1"] {
+.price-line[data-direction="-1"] .price-now,
+.price-line[data-direction="-1"] .price-move,
+.price-line[data-direction="-1"] .price-change {
   color: var(--color-down);
+}
+.price-today {
+  color: var(--color-text-muted);
+}
+.price-line-big .price-now {
+  font-size: 1.75rem;
+}
+.price-line-big .price-move {
+  font-size: 1rem;
+}
+.price-line-big .price-today {
+  font-size: 0.875rem;
+}
+.price-line-small .price-now {
+  font-size: 1rem;
+}
+.price-line-small .price-move {
+  font-size: 0.8125rem;
+}
+.price-line-small .price-today {
+  font-size: 0.75rem; /* on the same line as the price when there is room, and wrapping only when there is not */
 }
 .mini-area {
   position: relative;
@@ -611,4 +702,92 @@ tbody tr {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+}
+
+/* Order book and trades tape (see book/BookPanel.tsx) */
+.book-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* the order book on the left, the trades on the right */
+  gap: var(--space-4);
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .book-panel {
+    grid-template-columns: minmax(0, 1fr); /* on a narrow screen, one above the other */
+  }
+}
+.book-panel h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.875rem;
+}
+.book,
+.tape {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  border-collapse: collapse;
+}
+.book th,
+.book td,
+.tape th,
+.tape td {
+  height: 22px;
+  padding: 0 var(--space-2);
+  text-align: end;
+  white-space: nowrap;
+  border: 0;
+}
+.book thead th,
+.tape thead th {
+  position: static;
+  background: none;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  border-block-end: 1px solid var(--color-border);
+}
+/* A size has a bar behind it, as long as the size is large next to the others: bids grow leftward, asks rightward. */
+.book-size {
+  background-repeat: no-repeat;
+  background-size: var(--bar, 0%) 100%;
+}
+.book-bid {
+  background-image: linear-gradient(color-mix(in srgb, var(--color-up) 22%, transparent), color-mix(in srgb, var(--color-up) 22%, transparent));
+  background-position: right;
+}
+.book-ask {
+  background-image: linear-gradient(color-mix(in srgb, var(--color-down) 22%, transparent), color-mix(in srgb, var(--color-down) 22%, transparent));
+  background-position: left;
+}
+.book-best td {
+  font-weight: 700;
+}
+.tape-buy td {
+  color: var(--color-up);
+}
+.tape-sell td {
+  color: var(--color-down);
+}
+.tape th:first-child,
+.tape td:first-child {
+  text-align: start;
+}
+.book-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+/* Icons beside button text (see components/Icon.tsx) */
+.icon {
+  flex: none;
+}
+.watchlist-toggle,
+.symbol-detail-watch,
+.symbol-detail-close,
+.toast button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }

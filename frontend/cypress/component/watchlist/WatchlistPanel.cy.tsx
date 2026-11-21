@@ -42,7 +42,7 @@ describe("WatchlistPanel", () => {
   describe("opening a chart", () => {
     it("has a button for each symbol, named for what it does, that opens its chart", () => {
       mountPanel([item(0, "AAA"), item(3, "AAD")]);
-      cy.get('button[aria-label="Open the AAD chart"]').click();
+      cy.get('button[aria-label="Open the AAD Inc. (AAD) chart"]').click();
       cy.get("@open").should("have.been.calledOnceWith", 3);
     });
   });
@@ -60,35 +60,48 @@ describe("WatchlistPanel", () => {
       cy.get("#watchlist-title").should("have.focus");
     });
 
-    it("hides the cross from assistive technology, which hears the button's name instead", () => {
+    it("hides the cross icon from assistive technology, which hears the button's name instead", () => {
       mountPanel([item(0, "AAA")]);
-      cy.get(".watch-remove span").should("have.attr", "aria-hidden", "true");
+      cy.get(".watch-remove svg.icon").should("have.attr", "aria-hidden", "true");
+    });
+
+    it("centers the cross in a square button", () => {
+      mountPanel([item(0, "AAA")]);
+      cy.get(".watch-remove").then(($button) => {
+        const box = $button[0]!.getBoundingClientRect();
+        const icon = $button.find("svg")[0]!.getBoundingClientRect();
+        expect(box.width, "a square").to.be.closeTo(box.height, 1);
+        expect(Math.abs(icon.left + icon.width / 2 - (box.left + box.width / 2)), "horizontal offset").to.be.lessThan(1.5);
+        expect(Math.abs(icon.top + icon.height / 2 - (box.top + box.height / 2)), "vertical offset").to.be.lessThan(1.5);
+      });
     });
   });
 
   describe("keyboard", () => {
     it("reaches each symbol's open and remove buttons in order with Tab", () => {
       mountPanel([item(0, "AAA"), item(1, "AAB")]);
-      cy.get('button[aria-label="Open the AAA chart"]').focus();
+      cy.get('button[aria-label="Open the AAA Inc. (AAA) chart"]').focus();
       cy.realPress("Tab");
       cy.focused().should("have.attr", "aria-label", "Remove AAA from the watchlist");
       cy.realPress("Tab");
-      cy.focused().should("have.attr", "aria-label", "Open the AAB chart");
+      cy.focused().should("have.attr", "aria-label", "Open the AAB Inc. (AAB) chart");
       cy.realPress("Tab");
       cy.focused().should("have.attr", "aria-label", "Remove AAB from the watchlist");
     });
 
     it("opens a chart with Enter and removes a symbol with Space", () => {
       mountPanel([item(0, "AAA")]);
-      cy.get('button[aria-label="Open the AAA chart"]').focus().realPress("Enter");
+      cy.get('button[aria-label="Open the AAA Inc. (AAA) chart"]').focus().realPress("Enter");
       cy.get("@open").should("have.been.calledOnceWith", 0);
       cy.get('button[aria-label="Remove AAA from the watchlist"]').focus().realPress("Space");
       cy.get("@remove").should("have.been.calledOnceWith", 0);
     });
 
-    it("shows a visible focus ring on the buttons", () => {
+    it("shows a visible focus ring round the whole tile when its open button is reached by keyboard", () => {
       mountPanel([item(0, "AAA")]);
-      cy.get('button[aria-label="Open the AAA chart"]').focus().should("have.css", "outline-style", "solid");
+      cy.get("body").realPress("Tab");
+      cy.focused().should("have.class", "watch-open");
+      cy.get(".watch-item").should("have.css", "outline-style", "solid");
     });
   });
 
@@ -96,7 +109,7 @@ describe("WatchlistPanel", () => {
     localStorage.setItem("locale", "ja-JP");
     mountPanel([item(0, "AAA")]);
     cy.get("#watchlist-title").should("contain.text", "ウォッチリスト");
-    cy.get(".watch-open").should("have.attr", "aria-label", "AAA のチャートを開く");
+    cy.get(".watch-open").should("have.attr", "aria-label", "AAA Inc. (AAA) のチャートを開く");
     cy.get(".watch-remove").should("have.attr", "aria-label", "AAA をウォッチリストから削除");
   });
 });

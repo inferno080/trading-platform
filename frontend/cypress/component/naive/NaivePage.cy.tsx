@@ -459,10 +459,11 @@ describe("NaivePage: the open chart", () => {
 describe("NaivePage: the watchlist", () => {
   const panelItems = () => cy.get(".watchlist .watch-item");
 
-  it("starts empty, open, with a button that says how many symbols are on it", () => {
+  it("starts empty and open, with a button that says Watchlist (no count), and the heading says how many of the four are used", () => {
     goLiveWith(6);
     cy.get(".workspace").should("have.attr", "data-watchlist", "open");
-    cy.get(".watchlist-toggle").should("have.text", "Watchlist (0)").and("have.attr", "aria-expanded", "true");
+    cy.get(".watchlist-toggle").should("have.text", "Watchlist").and("have.attr", "aria-expanded", "true");
+    cy.get("#watchlist-title").should("contain.text", "0 of 4");
     cy.get(".watchlist-empty").should("exist");
   });
 
@@ -470,23 +471,23 @@ describe("NaivePage: the watchlist", () => {
     it("adds the open symbol from its chart: it subscribes, asks for its history, and shows a mini chart for it", () => {
       goLiveWith(6);
       cy.contains("button", "Add to watchlist").click();
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (1)");
-      panelItems().should("have.length", 1).first().should("contain.text", "AAA");
+      cy.get("#watchlist-title").should("contain.text", "1 of 4");
+      panelItems().should("have.length", 1).first().should("contain.text", "Apex Systems Inc. (AAA)");
       cy.then(() => expect(requests()).to.include("subscribe 0"));
       cy.contains("button", "Remove from watchlist").should("exist");
       panelItems().first().find("svg.skeleton").should("exist"); // until its history arrives
       deliverHistory(0, 29920);
       panelItems().first().find("canvas.mini-canvas").should("have.attr", "data-ready", "true");
-      panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+      panelItems().first().find(".price-now").should("contain.text", "299.20");
     });
 
     it("keeps each mini chart current with the symbol's live updates", () => {
       goLiveWith(6);
       cy.contains("button", "Add to watchlist").click();
       deliverHistory(0, 29920);
-      panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+      panelItems().first().find(".price-now").should("contain.text", "299.20");
       cy.then(() => socket().receive({ ...makeDelta(6, [makeUpdate(0, { last: 30500, ts: Date.now() + 5000 })]), ts: Date.now() }));
-      panelItems().first().find(".mini-caption").should("contain.text", "305.00");
+      panelItems().first().find(".price-now").should("contain.text", "305.00");
     });
 
     it("adds up to four symbols", () => {
@@ -496,7 +497,7 @@ describe("NaivePage: the watchlist", () => {
         cy.get("#symbol-detail-title").should("have.text", `${symbol} price chart`);
         cy.contains("button", "Add to watchlist").click();
       }
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (4)");
+      cy.get("#watchlist-title").should("contain.text", "4 of 4");
       panelItems().should("have.length", 4);
       cy.then(() => expect(requests().filter((request) => request.startsWith("subscribe"))).to.have.length(4));
     });
@@ -508,8 +509,8 @@ describe("NaivePage: the watchlist", () => {
       cy.get(".toast").should("contain.text", "The watchlist is full (4 symbols). Remove one to add another.");
       cy.get(".toast-region").should("have.attr", "aria-live", "polite");
       panelItems().should("have.length", 4);
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (4)");
-      cy.then(() => expect(requests()).not.to.include("subscribe 0"));
+      cy.get("#watchlist-title").should("contain.text", "4 of 4");
+      cy.then(() => expect(requests().filter((request) => request === "subscribe 0"), "only the open chart's own subscription").to.have.length(1));
     });
 
     it("lets the toast be dismissed", () => {
@@ -522,15 +523,24 @@ describe("NaivePage: the watchlist", () => {
   });
 
   describe("removing (unsubscribing)", () => {
-    it("takes the symbol off, unsubscribes from it, and moves focus to the heading", () => {
+    it("takes the symbol off and moves focus to the heading; it stays subscribed while its chart is open (for the order book and trades)", () => {
       goLiveWith(6);
       cy.contains("button", "Add to watchlist").click();
       panelItems().should("have.length", 1);
       cy.get('button[aria-label="Remove AAA from the watchlist"]').click();
       panelItems().should("have.length", 0);
       cy.get("#watchlist-title").should("have.focus");
+      cy.then(() => expect(requests()).not.to.include("unsubscribe 0")); // AAA's chart is still open
+      cy.get("#watchlist-title").should("contain.text", "0 of 4");
+    });
+
+    it("unsubscribes once the symbol is neither on the watchlist nor open", () => {
+      goLiveWith(6);
+      cy.contains("button", "Add to watchlist").click();
+      cy.contains("button", "Close chart").click();
+      cy.get('button[aria-label="Remove AAA from the watchlist"]').click();
+      panelItems().should("have.length", 0);
       cy.then(() => expect(requests()).to.include("unsubscribe 0"));
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (0)");
     });
 
     it("takes a symbol off from its own chart with Remove from watchlist", () => {
@@ -538,7 +548,7 @@ describe("NaivePage: the watchlist", () => {
       cy.contains("button", "Add to watchlist").click();
       cy.contains("button", "Remove from watchlist").click();
       panelItems().should("have.length", 0);
-      cy.then(() => expect(requests()).to.include("unsubscribe 0"));
+      cy.contains("button", "Add to watchlist").should("exist");
     });
 
     it("makes room for another symbol after one is removed from a full list", () => {
@@ -555,7 +565,7 @@ describe("NaivePage: the watchlist", () => {
     it("opens the symbol's chart when its name is pressed", () => {
       localStorage.setItem("watchlist", "[2]");
       goLiveWith(6);
-      cy.get('button[aria-label="Open the AAC chart"]').click();
+      cy.get('button[aria-label="Open the Cobalt Capital Inc. (AAC) chart"]').click();
       cy.get("#symbol-detail-title").should("have.text", "AAC price chart");
     });
   });

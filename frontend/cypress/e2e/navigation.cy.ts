@@ -23,7 +23,7 @@ describe("navigation and keyboard use", () => {
   it("writes the selected tab into the URL, and shows live data only on the Naive tab", () => {
     cy.visit("/");
     cy.get(".optimized-page").should("exist");
-    cy.get("tbody").should("not.exist");
+    cy.get(".table-wrap").should("not.exist");
 
     cy.get("#tab-naive").click();
     cy.location("hash").should("equal", "#/naive");
@@ -32,7 +32,7 @@ describe("navigation and keyboard use", () => {
     cy.get("#tab-optimized").click();
     cy.location("hash").should("equal", "#/optimized");
     cy.get(".optimized-page").should("exist");
-    cy.get("tbody").should("not.exist"); // the Naive table is gone from the page, not just hidden
+    cy.get(".table-wrap").should("not.exist"); // the Naive table is gone from the page, not just hidden
   });
 
   it("switches tabs with the arrow keys", () => {

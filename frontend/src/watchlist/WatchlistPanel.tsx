@@ -1,4 +1,5 @@
 import { useRef, type ReactNode } from "react";
+import { Icon } from "../components/Icon";
 import { useT } from "../i18n/useT";
 import { WATCHLIST_LIMIT } from "./useWatchlist";
 
@@ -14,6 +15,9 @@ interface WatchlistPanelProps {
   onOpen: (id: number) => void;
   onRemove: (id: number) => void;
 }
+
+/** What an entry is called: the name with the symbol in brackets after it, or just the symbol while the name is not known. */
+const label = (item: WatchlistItem): string => (item.name ? `${item.name} (${item.symbol})` : item.symbol);
 
 /** The watchlist: each symbol with a mini chart, a button to open its chart, and a button to remove it. */
 export function WatchlistPanel({ items, onOpen, onRemove }: WatchlistPanelProps) {
@@ -32,10 +36,10 @@ export function WatchlistPanel({ items, onOpen, onRemove }: WatchlistPanelProps)
           {items.map((item) => (
             <li className="watch-item" key={item.id}>
               <div className="watch-item-header">
-                <button type="button" className="watch-open" onClick={() => onOpen(item.id)} aria-label={t("watchlist.open", { symbol: item.symbol })}>
-                  {item.symbol}
+                {/* One button opens the chart, and it covers the whole tile (see .watch-open::after), so the tile is the click target. */}
+                <button type="button" className="watch-open" onClick={() => onOpen(item.id)} aria-label={t("watchlist.open", { label: label(item) })}>
+                  {label(item)}
                 </button>
-                <span className="watch-name">{item.name}</span>
                 <button
                   type="button"
                   className="watch-remove"
@@ -45,7 +49,7 @@ export function WatchlistPanel({ items, onOpen, onRemove }: WatchlistPanelProps)
                     heading.current?.focus(); // the item is gone, so keyboard focus goes to the list's heading, not nowhere
                   }}
                 >
-                  <span aria-hidden="true">✕</span>
+                  <Icon name="x" />
                 </button>
               </div>
               {item.chart}

@@ -1,5 +1,9 @@
 import { useState } from "react";
+import { useIntl } from "react-intl";
+import { BookPanel } from "../book/BookPanel";
+import { priceSummary } from "../chart/price";
 import { SymbolDetail } from "../chart/SymbolDetail";
+import { PriceLine } from "../components/PriceLine";
 import { MiniChartLoading, SymbolDetailSkeleton } from "../components/skeletons";
 import { Hud } from "../hud/Hud";
 import { useT } from "../i18n/useT";
@@ -13,12 +17,13 @@ import { NaiveChart } from "./NaiveChart";
 import { FIRST_INSTRUMENT } from "../chart/series";
 import { NaiveMiniChart } from "./NaiveMiniChart";
 import { QuotesTable } from "./QuotesTable";
-import { useNaiveFeed } from "./useNaiveFeed";
+import { useNaiveFeed, type Book } from "./useNaiveFeed";
 
 interface SelectedChartProps {
   quote: Quote | undefined;
   instrument: InstrumentReference | undefined;
   data: number[] | null;
+  book: Book;
   unavailable: boolean;
   inWatchlist: boolean;
   onToggleWatchlist: () => void;
@@ -27,7 +32,8 @@ interface SelectedChartProps {
 }
 
 /** The panel with the open symbol's chart: its skeleton until the page knows the symbol, then the panel itself. */
-function SelectedChart({ quote, instrument, data, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
+function SelectedChart({ quote, instrument, data, book, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
+  const { locale } = useIntl();
   if (!quote || !instrument) return <SymbolDetailSkeleton />;
   return (
     <SymbolDetail
@@ -40,8 +46,10 @@ function SelectedChart({ quote, instrument, data, unavailable, inWatchlist, onTo
       onToggleWatchlist={onToggleWatchlist}
       onClose={onClose}
       takeFocus={takeFocus}
+      side={<BookPanel depth={book.depth} tape={book.tape} decimals={instrument.decimals} />}
+      price={<PriceLine summary={priceSummary(data ?? undefined, instrument.decimals, instrument.prevClose, locale)} variant="big" />}
     >
-      <NaiveChart symbol={quote.sym} decimals={instrument.decimals} data={data} unavailable={unavailable} />
+      <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} unavailable={unavailable} />
     </SymbolDetail>
   );
 }
@@ -57,7 +65,7 @@ export function NaivePage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable } = useNaiveFeed(selectedId, watchlist.ids);
+  const { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book } = useNaiveFeed(selectedId, watchlist.ids);
   const selectedQuote = selectedId === null ? undefined : quotes[selectedId];
   const selectedInstrument = selectedId === null ? undefined : reference?.get(selectedId);
 
@@ -69,7 +77,7 @@ export function NaivePage() {
       id,
       symbol: quote?.sym ?? `#${id}`,
       name: instrument?.name ?? "",
-      chart: instrument && quote ? <NaiveMiniChart symbol={quote.sym} decimals={instrument.decimals} data={charts[id]} /> : <MiniChartLoading />,
+      chart: instrument && quote ? <NaiveMiniChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={charts[id]} /> : <MiniChartLoading />,
     };
   });
 
@@ -80,28 +88,30 @@ export function NaivePage() {
         <span className="status" data-status={status} role="status">
           {t(`status.${status}`)}
         </span>
-        <WatchlistToggle count={watchlist.ids.length} open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
+        <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
       </div>
       {badVersion !== null && (
         <p role="alert">{t("error.protocol", { version: badVersion, expected: PROTOCOL_VERSION })}</p>
       )}
       {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
       <Hud session={session} mode="naive" />
-      {selectedId !== null && (
-        <SelectedChart
-          quote={selectedQuote}
-          instrument={selectedInstrument}
-          data={charts[selectedId] ?? null}
-          unavailable={chartUnavailable.includes(selectedId)}
-          inWatchlist={watchlist.ids.includes(selectedId)}
-          onToggleWatchlist={() => watchlist.toggle(selectedId)}
-          onClose={() => choose(null)}
-          takeFocus={userChose}
-        />
-      )}
+      {/* The open chart (70%) beside the watchlist (30%), and the quotes below, across the full width. */}
       <Workspace open={watchlist.open} panel={<WatchlistPanel items={items} onOpen={choose} onRemove={watchlist.remove} />}>
-        <QuotesTable quotes={quotes} reference={reference} selectedId={selectedId} onSelect={choose} />
+        {selectedId !== null && (
+          <SelectedChart
+            quote={selectedQuote}
+            instrument={selectedInstrument}
+            data={charts[selectedId] ?? null}
+            book={book}
+            unavailable={chartUnavailable.includes(selectedId)}
+            inWatchlist={watchlist.ids.includes(selectedId)}
+            onToggleWatchlist={() => watchlist.toggle(selectedId)}
+            onClose={() => choose(null)}
+            takeFocus={userChose}
+          />
+        )}
       </Workspace>
+      <QuotesTable quotes={quotes} reference={reference} selectedId={selectedId} onSelect={choose} />
       <Toast toast={watchlist.toast} onDismiss={watchlist.dismissToast} />
     </>
   );

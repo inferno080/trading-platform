@@ -1,4 +1,5 @@
-import { decimalFormatter } from "../lib/format";
+import { decimalFormatter, timeFormatter } from "../lib/format";
+import { isUp } from "./price";
 
 /** The colors a chart is drawn in, read from the design tokens so it follows the theme. */
 export interface ChartColors {
@@ -18,6 +19,8 @@ export interface ChartView {
   decimals: number; // of the instrument, for the price labels
   locale: string;
   hoverX: number | null; // pointer position in CSS pixels across the canvas, or null when it is not over it
+  prevClose: number; // the previous close as a wire integer, which decides the line's color and where the dotted line goes (0: not known)
+  prevCloseLabel: string; // the words beside the dotted line, such as "Prev close"
 }
 
 const PAD = { left: 68, right: 14, top: 14, bottom: 26 };
@@ -40,16 +43,6 @@ export function readChartColors(): ChartColors {
   };
 }
 
-const timeFormats = new Map<string, Intl.DateTimeFormat>();
-const timeFormat = (locale: string): Intl.DateTimeFormat => {
-  let format = timeFormats.get(locale);
-  if (!format) {
-    format = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    timeFormats.set(locale, format);
-  }
-  return format;
-};
-
 /** Index of the point whose time is closest to `time` (binary search over the times, which are in order). */
 export function nearestIndex(data: ArrayLike<number>, time: number): number {
   let low = 0;
@@ -63,10 +56,13 @@ export function nearestIndex(data: ArrayLike<number>, time: number): number {
   return low;
 }
 
-/** Lowest and highest price, widened a little so the line does not touch the edges (and never flat). */
-function priceRange(data: ArrayLike<number>): [number, number] {
-  let low = Infinity;
-  let high = -Infinity;
+/**
+ * Lowest and highest price, widened a little so the line does not touch the edges (and never flat). The previous close is
+ * counted too, so the dotted line at it is always inside the chart, however far the price has moved from it.
+ */
+function priceRange(data: ArrayLike<number>, prevClose: number): [number, number] {
+  let low = prevClose > 0 ? prevClose : Infinity;
+  let high = prevClose > 0 ? prevClose : -Infinity;
   for (let i = 1; i < data.length; i += 2) {
     low = Math.min(low, data[i]!);
     high = Math.max(high, data[i]!);
@@ -115,7 +111,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, plot: Plot, view: ChartView, co
     ctx.fillText(price.format(value / scale), plot.left - 8, y);
   }
   ctx.textBaseline = "top";
-  const time = timeFormat(view.locale);
+  const time = timeFormatter(view.locale);
   for (let i = 0; i < TIME_LABELS; i++) {
     const at = plot.start + (i * (plot.end - plot.start)) / (TIME_LABELS - 1);
     ctx.textAlign = alignFor(i);
@@ -124,8 +120,31 @@ function drawGrid(ctx: CanvasRenderingContext2D, plot: Plot, view: ChartView, co
   }
 }
 
-function drawLine(ctx: CanvasRenderingContext2D, plot: Plot, data: ArrayLike<number>, colors: ChartColors): void {
-  ctx.strokeStyle = colors.line;
+/** A dotted line across the chart at the previous close, with its words and price, so it is clear what "up" and "down" mean. */
+function drawPrevClose(ctx: CanvasRenderingContext2D, plot: Plot, view: ChartView, colors: ChartColors): void {
+  if (view.prevClose <= 0) return;
+  const y = Math.round(yOf(plot, view.prevClose)) + 0.5;
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = colors.muted;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(plot.left, y);
+  ctx.lineTo(plot.left + plot.width, y);
+  ctx.stroke();
+  ctx.restore();
+  const price = decimalFormatter(view.locale, view.decimals).format(view.prevClose / 10 ** view.decimals);
+  ctx.font = FONT;
+  ctx.fillStyle = colors.muted;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(`${view.prevCloseLabel} ${price}`, plot.left + plot.width - 4, y - 3);
+}
+
+function drawLine(ctx: CanvasRenderingContext2D, plot: Plot, data: ArrayLike<number>, colors: ChartColors, prevClose: number): void {
+  // Green or red like the price and its "Today" move: the newest price against the previous close.
+  const color = isUp(data, prevClose) ? colors.up : colors.down;
+  ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.beginPath();
@@ -136,7 +155,7 @@ function drawLine(ctx: CanvasRenderingContext2D, plot: Plot, data: ArrayLike<num
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
-  ctx.fillStyle = colors.line; // a dot on the newest price
+  ctx.fillStyle = color; // a dot on the newest price
   ctx.beginPath();
   ctx.arc(xOf(plot, data[data.length - 2]!), yOf(plot, data[data.length - 1]!), 3.5, 0, Math.PI * 2);
   ctx.fill();
@@ -163,7 +182,7 @@ function drawHover(ctx: CanvasRenderingContext2D, plot: Plot, data: ArrayLike<nu
   ctx.arc(x, y, 4, 0, Math.PI * 2);
   ctx.fill();
 
-  const label = `${timeFormat(view.locale).format(time)}  ${decimalFormatter(view.locale, view.decimals).format(price / 10 ** view.decimals)}`;
+  const label = `${timeFormatter(view.locale).format(time)}  ${decimalFormatter(view.locale, view.decimals).format(price / 10 ** view.decimals)}`;
   const boxWidth = ctx.measureText(label).width + 16;
   const boxX = x + 10 + boxWidth > plot.left + plot.width ? x - 10 - boxWidth : x + 10; // flip to the left near the right edge
   ctx.fillStyle = colors.background;
@@ -187,9 +206,10 @@ export function drawChart(ctx: CanvasRenderingContext2D, data: ArrayLike<number>
   const width = view.width - PAD.left - PAD.right;
   const height = view.height - PAD.top - PAD.bottom;
   if (data.length < 4 || width <= 0 || height <= 0) return; // fewer than two points is not a line
-  const [low, high] = priceRange(data);
+  const [low, high] = priceRange(data, view.prevClose);
   const plot: Plot = { left: PAD.left, top: PAD.top, width, height, low, high, start: data[0]!, end: data[data.length - 2]! };
   drawGrid(ctx, plot, view, colors);
-  drawLine(ctx, plot, data, colors);
+  drawPrevClose(ctx, plot, view, colors);
+  drawLine(ctx, plot, data, colors, view.prevClose);
   drawHover(ctx, plot, data, view, colors);
 }

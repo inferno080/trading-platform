@@ -299,8 +299,9 @@ describe("OptimizedPage: the open chart", () => {
 describe("OptimizedPage: the watchlist", () => {
   it("is on the page from the first moment, with the same layout, so nothing jumps when the data arrives", () => {
     mountPage();
-    cy.get(".workspace[data-watchlist=open] .workspace-main .skeleton-frame").should("exist"); // the table's skeleton
+    cy.get(".workspace[data-watchlist=open][data-main=chart] .workspace-main .symbol-detail svg.skeleton").should("exist"); // the chart panel's skeleton
     cy.get(".workspace-side .watchlist").should("exist");
+    cy.get(".workspace").next("[role=status]").find(".skeleton-frame").should("exist"); // and the table's skeleton below, outside the row
   });
 
   it("shows skeletons for saved entries before the page knows their symbols", () => {
@@ -321,14 +322,15 @@ describe("OptimizedPage: the watchlist", () => {
       mountPage();
       deliverMarketWith(6);
       cy.contains("button", "Add to watchlist").click();
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (1)");
-      panelItems().should("have.length", 1).first().should("contain.text", "AAA");
+      cy.get(".watchlist-toggle").should("have.text", "Watchlist");
+      cy.get("#watchlist-title").should("contain.text", "1 of 4");
+      panelItems().should("have.length", 1).first().should("contain.text", "(AAA)");
       cy.wrap(null).should(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [0] }));
       cy.contains("button", "Remove from watchlist").should("exist");
       panelItems().first().find("svg.skeleton").should("exist");
       sendChart(0, 29920);
       panelItems().first().find("canvas.mini-canvas").should("have.attr", "data-ready", "true");
-      panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+      panelItems().first().find(".price-now").should("contain.text", "299.20");
     });
 
     it("shows a toast, and adds nothing, when the watchlist is full", () => {
@@ -338,7 +340,7 @@ describe("OptimizedPage: the watchlist", () => {
       cy.contains("button", "Add to watchlist").click();
       cy.get(".toast").should("contain.text", "The watchlist is full (4 symbols). Remove one to add another.");
       panelItems().should("have.length", 4);
-      cy.get(".watchlist-toggle").should("have.text", "Watchlist (4)");
+      cy.get("#watchlist-title").should("contain.text", "4 of 4");
       cy.then(() => expect(lastCommand("watch")).to.deep.equal({ type: "watch", ids: [1, 2, 3, 4] }));
     });
 
@@ -377,7 +379,7 @@ describe("OptimizedPage: the watchlist", () => {
     localStorage.setItem("watchlist", "[2]");
     mountPage();
     deliverMarketWith(6);
-    cy.get('button[aria-label="Open the AAC chart"]').click();
+    cy.get('button[aria-label="Open the Cobalt Capital Inc. (AAC) chart"]').click();
     cy.get("#symbol-detail-title").should("have.text", "AAC price chart");
   });
 
@@ -418,13 +420,13 @@ describe("OptimizedPage: the watchlist", () => {
     deliverMarketWith(6);
     refreshBox().clear().type("0");
     sendChart(1, 29920);
-    panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+    panelItems().first().find(".price-now").should("contain.text", "299.20");
     cy.contains("button", "Freeze stream").click();
     sendChart(1, 31000);
     afterFrames(10);
-    panelItems().first().find(".mini-caption").should("contain.text", "299.20");
+    panelItems().first().find(".price-now").should("contain.text", "299.20");
     cy.contains("button", "Freeze stream").click();
-    panelItems().first().find(".mini-caption").should("contain.text", "310.00");
+    panelItems().first().find(".price-now").should("contain.text", "310.00");
   });
 
   it("can be used with the keyboard alone", () => {

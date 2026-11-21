@@ -21,6 +21,8 @@ const detail = (overrides: Overrides = {}, handlers: { onClose?: () => void; onT
     onToggleWatchlist={handlers.onToggleWatchlist ?? cy.stub().as("toggle")}
     onClose={handlers.onClose ?? cy.stub().as("close")}
     takeFocus={overrides.takeFocus ?? false}
+    side={<p id="side">the book and trades</p>}
+    price={<p id="price">912.76</p>}
   >
     <p id="chart">the chart</p>
   </SymbolDetail>
@@ -32,6 +34,35 @@ describe("SymbolDetail", () => {
     cy.get("section.symbol-detail").should("have.attr", "aria-labelledby", "symbol-detail-title");
     cy.get("#symbol-detail-title").should("have.text", "AAA price chart");
     cy.get("#chart").should("exist");
+  });
+
+  it("shows the price under the heading, above the chart", () => {
+    cy.mount(withI18n(detail()));
+    cy.get(".symbol-detail-price #price").should("have.text", "912.76");
+    cy.get("#symbol-detail-title").then(($title) => {
+      cy.get("#price").then(($price) => {
+        cy.get("#chart").then(($chart) => {
+          expect($price[0]!.getBoundingClientRect().top).to.be.greaterThan($title[0]!.getBoundingClientRect().bottom - 1);
+          expect($chart[0]!.getBoundingClientRect().top).to.be.greaterThan($price[0]!.getBoundingClientRect().bottom - 1);
+        });
+      });
+    });
+  });
+
+  it("puts the chart across the full width, with the side content (the order book and trades) below it", () => {
+    cy.mount(withI18n(detail()));
+    cy.get(".symbol-detail-chart #chart").should("exist");
+    cy.get(".symbol-detail-side #side").should("exist");
+    cy.get(".symbol-detail-chart").then(($chart) => {
+      cy.get(".symbol-detail-side").then(($side) => {
+        cy.get(".symbol-detail").then(($panel) => {
+          const chart = $chart[0]!.getBoundingClientRect();
+          const side = $side[0]!.getBoundingClientRect();
+          expect(side.top, "the side content is below the chart").to.be.at.least(chart.bottom - 1);
+          expect(chart.width, "the chart is as wide as the panel's content").to.be.greaterThan($panel[0]!.getBoundingClientRect().width - 60);
+        });
+      });
+    });
   });
 
   it("shows the name, the currency, and the tick size and decimals that are not columns in the quotes", () => {
