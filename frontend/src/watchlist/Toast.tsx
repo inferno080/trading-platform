@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Icon } from "../components/Icon";
 import { useT } from "../i18n/useT";
 import type { ToastMessage } from "./useWatchlist";
 
@@ -33,6 +34,7 @@ export function Toast({ toast, onDismiss, durationMs = TOAST_MS }: { toast: Toas
         >
           <span>{toast.text}</span>
           <button type="button" onClick={onDismiss}>
+            <Icon name="x" />
             {t("watchlist.dismiss")}
           </button>
         </div>

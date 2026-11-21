@@ -1,5 +1,8 @@
-import type { ChartUpdate } from "../feed/messages";
-import type { InstrumentReference, Quote } from "../protocol/messages";
+import type { ChartUpdate, DepthUpdate, TradesUpdate } from "../feed/messages";
+import type { InstrumentReference, Quote, Trade } from "../protocol/messages";
+
+/** How many recent trades are kept for the tape. */
+export const TAPE_LENGTH = 30;
 
 /** An instrument with no update for this long is shown as stale. */
 export const STALE_AFTER_MS = 5_000;
@@ -68,6 +71,39 @@ export class FeedStore {
   /** The reference data of one instrument, once it has arrived. */
   instrument(id: number): InstrumentReference | undefined {
     return this.reference?.get(id);
+  }
+
+  /** The open instrument's order book (the whole ladder, as last sent), and its recent trades, newest first. */
+  book: DepthUpdate | null = null;
+  tape: Trade[] = [];
+  private readonly bookListeners = new Set<() => void>();
+
+  setBook(depth: DepthUpdate): void {
+    this.book = depth;
+    this.notifyBook();
+  }
+
+  /** Add trades to the front of the tape, which keeps only the most recent. */
+  addTrades(update: TradesUpdate): void {
+    this.tape = [...update.trades.slice().reverse(), ...this.tape].slice(0, TAPE_LENGTH);
+    this.notifyBook();
+  }
+
+  /** Forget the book and the tape, when another instrument is opened or none. */
+  clearBook(): void {
+    this.book = null;
+    this.tape = [];
+    this.notifyBook();
+  }
+
+  /** Be told when the book or the tape changes. Returns the way to stop. */
+  subscribeBook(listener: () => void): () => void {
+    this.bookListeners.add(listener);
+    return () => this.bookListeners.delete(listener);
+  }
+
+  private notifyBook(): void {
+    for (const listener of this.bookListeners) listener();
   }
 
   /** The price charts of the tracked instruments (the open one and the watchlist's), as last sent by the worker. */

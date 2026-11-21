@@ -3,30 +3,31 @@ import { useIntl } from "react-intl";
 import { readChartColors } from "../chart/drawChart";
 import { useCanvasSize, useThemeVersion } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
-import { drawSparkline, sparkCaption } from "../chart/sparkline";
+import { drawSparkline } from "../chart/sparkline";
 import { MiniChartSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
 import type { FeedStore } from "./feedStore";
+import { OptimizedPriceLine } from "./OptimizedPriceLine";
 
 interface OptimizedMiniChartProps {
   store: FeedStore;
   id: number;
   symbol: string;
   decimals: number;
+  prevClose: number;
   /** The same refresh interval and Freeze as the quotes and the big chart. */
   refreshMs: number;
   frozen: boolean;
 }
 
 /**
- * A watchlist mini chart drawn from the store, not from React state: the canvas and its caption are written directly, at
- * most once per refresh interval, so a tick causes no React render.
+ * A watchlist mini chart drawn from the store, not from React state: the canvas is drawn directly, at most once per
+ * refresh interval, so a tick causes no React render of the chart. The price above it is a tiny component of its own.
  */
-export function OptimizedMiniChart({ store, id, symbol, decimals, refreshMs, frozen }: OptimizedMiniChartProps) {
+export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, refreshMs, frozen }: OptimizedMiniChartProps) {
   const t = useT();
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
-  const caption = useRef<HTMLSpanElement>(null);
   const shown = useRef<Float64Array | undefined>(undefined); // what was last drawn: a frozen chart redraws this, not newer data
   const size = useCanvasSize(canvas);
   const themeVersion = useThemeVersion();
@@ -42,14 +43,9 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, refreshMs, fro
       const data = frozen ? shown.current : store.chart(id); // frozen: hold the view, even through a resize or a new theme
       if (!context || !data || size.width === 0) return;
       shown.current = data;
-      drawSparkline(context, data, size, readChartColors());
+      drawSparkline(context, data, size, readChartColors(), prevClose);
       drawnAt = performance.now();
       setPainted(true);
-      const text = sparkCaption(data, decimals, locale);
-      if (caption.current && text) {
-        caption.current.textContent = text.text;
-        caption.current.dataset.direction = String(text.direction);
-      }
       canvas.current?.setAttribute("aria-label", chartLabel(t, symbol, data, decimals, locale));
     };
     const scheduleNow = () => {
@@ -75,11 +71,11 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, refreshMs, fro
       clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [store, id, size, decimals, locale, themeVersion, symbol, t, refreshMs, frozen]);
+  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs, frozen]);
 
   return (
     <div className="mini-chart">
-      <span ref={caption} className="mini-caption" data-direction="0" />
+      <OptimizedPriceLine store={store} id={id} decimals={decimals} prevClose={prevClose} variant="small" refreshMs={refreshMs} frozen={frozen} />
       <div className="mini-area">
         <canvas ref={canvas} className="mini-canvas" role="img" aria-label={symbol} data-ready={painted} />
         {!painted && (

@@ -62,7 +62,40 @@ export function MiniChartSkeleton() {
   );
 }
 
-// The inside of the chart panel: its heading line, then the chart.
+// The order book and the trades, as placeholders side by side: a heading and a few rows each.
+function BookShape() {
+  const rows = (count: number, columns: number): Bar[] => [
+    ...Array.from({ length: columns }, (_, c): Bar => ({ x: `${c * (100 / columns) + 2}%`, y: 6, width: `${100 / columns - 8}%`, height: 10 })),
+    ...Array.from({ length: count }, (_, r) =>
+      Array.from({ length: columns }, (_, c): Bar => ({ x: `${c * (100 / columns) + 2}%`, y: 30 + r * 24, width: `${100 / columns - 8}%`, height: 9 })),
+    ).flat(),
+  ];
+  return (
+    <div className="book-panel">
+      <div>
+        <SkeletonSvg height={28} bars={[{ x: 0, y: 4, width: 110, height: 14 }]} />
+        <SkeletonSvg height={30 + 10 * 24} bars={rows(10, 4)} />
+      </div>
+      <div>
+        <SkeletonSvg height={28} bars={[{ x: 0, y: 4, width: 120, height: 14 }]} />
+        <SkeletonSvg height={30 + 10 * 24} bars={rows(10, 4)} />
+      </div>
+    </div>
+  );
+}
+
+/** Placeholder for the order book and trades while the first order book is on its way. */
+export function BookSkeleton() {
+  const t = useT();
+  return (
+    <div role="status">
+      <span className="visually-hidden">{t("book.loading")}</span>
+      <BookShape />
+    </div>
+  );
+}
+
+// The inside of the chart panel: its heading line, the chart across the full width, and the order book and trades below it.
 function DetailShape() {
   return (
     <>
@@ -75,7 +108,14 @@ function DetailShape() {
           ]}
         />
       </div>
-      <ChartSkeleton />
+      <div className="symbol-detail-body">
+        <div className="symbol-detail-chart">
+          <ChartSkeleton />
+        </div>
+        <div className="symbol-detail-side">
+          <BookShape />
+        </div>
+      </div>
     </>
   );
 }
@@ -151,7 +191,7 @@ export function TableSkeleton() {
 
 /**
  * Placeholder for a whole iteration page while its code downloads. It has the shape of the real page: the toolbar, the
- * performance panel, the chart panel, and then the quotes (70% of the width) beside the watchlist (30%), so nothing
+ * performance panel, the chart panel (70% of the width) beside the watchlist (30%), and the quotes below, so nothing
  * jumps when the page replaces it.
  */
 export function PageSkeleton() {
@@ -164,17 +204,17 @@ export function PageSkeleton() {
       <div className="hud">
         <SkeletonSvg height={96} bars={hudBars} />
       </div>
-      <section className="symbol-detail">
-        <DetailShape />
-      </section>
-      <div className="workspace" data-watchlist="open">
+      <div className="workspace" data-watchlist="open" data-main="chart">
         <div className="workspace-main">
-          <TableSkeleton />
+          <section className="symbol-detail">
+            <DetailShape />
+          </section>
         </div>
         <aside className="workspace-side">
           <WatchlistShape />
         </aside>
       </div>
+      <TableSkeleton />
     </div>
   );
 }

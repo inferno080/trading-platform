@@ -7,9 +7,12 @@ import {
   PROTOCOL_VERSION,
   type InstrumentReference,
   type Quote,
+  type Depth,
   type HistoryData,
   type QuoteUpdate,
   type Rejected,
+  type Trade,
+  type Trades,
   type Session,
 } from "../protocol/messages";
 
@@ -34,6 +37,15 @@ export const applyUpdates = (quotes: Quote[], updates: QuoteUpdate[]): Quote[] =
 /** The price charts of the tracked instruments (the open one and the watchlist's), by instrument id. */
 export type Charts = Record<number, number[]>;
 
+/** How many recent trades the tape keeps. */
+const TAPE_LENGTH = 30;
+
+/** The open instrument's order book and recent trades (newest first). */
+export interface Book {
+  depth: Depth | null;
+  tape: Trade[];
+}
+
 const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
 
 /** Naive: every update of a tracked instrument copies its whole chart (and the lot of them) and sets state again. */
@@ -48,6 +60,13 @@ function foldTicks(setCharts: (update: (previous: Charts) => Charts) => void, tr
       return { ...previous, [update.id]: data };
     });
   }
+}
+
+/** Naive: each order book and each batch of trades makes a new book, with the trades copied in front of the old tape. */
+function applyBookMessage(msg: Depth | Trades, open: number | null, setBook: (update: (previous: Book) => Book) => void): void {
+  if (msg.id !== open) return; // for an instrument that is not the open one
+  if (msg.t === "depth") setBook((previous) => ({ ...previous, depth: msg }));
+  else setBook((previous) => ({ ...previous, tape: [...msg.trades.slice().reverse(), ...previous.tape].slice(0, TAPE_LENGTH) }));
 }
 
 /** The server's answer to a request for a tracked instrument's history: the data, or a refusal. */
@@ -80,11 +99,13 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
   // The price charts of the tracked instruments, and the ones the server has no history for.
   const [charts, setCharts] = useState<Charts>({});
   const [chartUnavailable, setChartUnavailable] = useState<number[]>([]);
+  const [book, setBook] = useState<Book>({ depth: null, tape: [] });
   const socket = useRef<WebSocket | null>(null);
   const tracked = useRef<ReadonlySet<number>>(new Set()); // read by the socket's handlers, which are set up once
   const requested = useRef(new Set<number>()); // histories asked for on this connection
   const subscribed = useRef(new Set<number>()); // watchlist subscriptions made on this connection
   const sync = useRef<() => void>(() => undefined);
+  const openId = useRef<number | null>(selectedId); // the open instrument, which the socket's handlers compare with
 
   // Make what the server knows match what the page wants: history for each tracked instrument, subscriptions for the
   // watchlist, and nothing kept for instruments that are no longer tracked. Runs when the choice changes, and again
@@ -94,6 +115,8 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
       const wanted = new Set(watchlist);
       if (selectedId !== null) wanted.add(selectedId);
       tracked.current = wanted;
+      openId.current = selectedId;
+      setBook({ depth: null, tape: [] }); // the old instrument's book and trades are not the new one's
       for (const id of [...requested.current]) if (!wanted.has(id)) requested.current.delete(id);
       setCharts((previous) => {
         const kept = Object.keys(previous).filter((id) => wanted.has(Number(id)));
@@ -108,12 +131,13 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
         requested.current.add(id);
         ws.send(encodeClientMessage({ t: "history", id }));
       }
+      // Subscribed to: the watchlist, and the open instrument, which needs it for its order book and trades.
       for (const id of [...subscribed.current]) {
-        if (watchlist.includes(id)) continue;
+        if (wanted.has(id)) continue;
         subscribed.current.delete(id);
         ws.send(encodeClientMessage({ t: "unsubscribe", id }));
       }
-      for (const id of watchlist) {
+      for (const id of wanted) {
         if (subscribed.current.has(id)) continue;
         subscribed.current.add(id);
         ws.send(encodeClientMessage({ t: "subscribe", id }));
@@ -182,6 +206,11 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
           foldTicks(setCharts, tracked.current, msg.updates);
           break;
 
+        case "depth":
+        case "trades":
+          applyBookMessage(msg, openId.current, setBook);
+          break;
+
         case "history":
         case "rejected":
           applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
@@ -196,5 +225,5 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
     };
   }, []);
 
-  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable };
+  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book };
 }

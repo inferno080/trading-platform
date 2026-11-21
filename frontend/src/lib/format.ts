@@ -11,6 +11,18 @@ const cached = (key: string, create: () => Intl.NumberFormat): Intl.NumberFormat
   return formatter;
 };
 
+const timeFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** Formats a time of day with seconds, such as "03:51:06 PM" or "15:51:06". */
+export const timeFormatter = (locale: string): Intl.DateTimeFormat => {
+  let format = timeFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    timeFormats.set(locale, format);
+  }
+  return format;
+};
+
 /** Formats a number with a fixed count of decimals, for example a metric or a price. */
 export const decimalFormatter = (locale: string, decimals: number): Intl.NumberFormat =>
   cached(
@@ -20,6 +32,13 @@ export const decimalFormatter = (locale: string, decimals: number): Intl.NumberF
 
 /** Formats a real price (already divided by 10^decimals) with that instrument's number of decimals. */
 export const priceFormatter = (locale: string, decimals: number): Intl.NumberFormat => decimalFormatter(locale, decimals);
+
+/** Formats a change in price with a sign (+5.65 or -5.65, and no sign for zero) and the instrument's decimals. */
+export const signedDecimalFormatter = (locale: string, decimals: number): Intl.NumberFormat =>
+  cached(
+    `${locale}|signed|${decimals}`,
+    () => new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals, signDisplay: "exceptZero" }),
+  );
 
 /** Formats whole numbers such as sizes and volume. */
 export const integerFormatter = (locale: string): Intl.NumberFormat =>

@@ -12,6 +12,7 @@ interface OptimizedChartProps {
   id: number;
   symbol: string;
   decimals: number;
+  prevClose: number;
   unavailable: boolean;
   /** How often the chart redraws for new data, in ms (0: every frame), and whether Freeze is on. Same settings as the grid's. */
   refreshMs: number;
@@ -26,7 +27,7 @@ const LABEL_EVERY_MS = 1000;
  * current and sends it, the store holds it, and this draws from the store at most once per animation frame, however
  * many updates arrived, so no React render is involved in a tick.
  */
-export function OptimizedChart({ store, id, symbol, decimals, unavailable, refreshMs, frozen }: OptimizedChartProps) {
+export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavailable, refreshMs, frozen }: OptimizedChartProps) {
   const t = useT();
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -50,7 +51,7 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
       const data = frozen ? shown.current : store.chart(id); // frozen: hold the view, even through a resize or a new theme
       if (!element || !context || !data || size.width === 0) return;
       shown.current = data;
-      drawChart(context, data, { ...size, decimals, locale, hoverX: hoverX.current }, readChartColors());
+      drawChart(context, data, { ...size, decimals, locale, hoverX: hoverX.current, prevClose, prevCloseLabel: t("table.prevClose") }, readChartColors());
       drawnAt = performance.now();
       setPainted(true);
       if (performance.now() - labelledAt > LABEL_EVERY_MS) {
@@ -84,7 +85,7 @@ export function OptimizedChart({ store, id, symbol, decimals, unavailable, refre
       clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [store, id, size, decimals, locale, themeVersion, symbol, t, refreshMs, frozen]);
+  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs, frozen]);
 
   return (
     <div className="chart-area">

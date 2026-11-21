@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useIntl } from "react-intl";
+import { Icon } from "../components/Icon";
 import { useT } from "../i18n/useT";
 import { decimalFormatter } from "../lib/format";
 
@@ -20,6 +21,10 @@ interface SymbolDetailProps {
    */
   takeFocus: boolean;
   children: ReactNode; // the chart, which is what differs between the tabs
+  /** The order book and the trades tape, side by side below the chart. */
+  side: ReactNode;
+  /** The current price and how it moved today, large, under the heading. */
+  price: ReactNode;
 }
 
 /**
@@ -27,7 +32,7 @@ interface SymbolDetailProps {
  * same. Focus moves to its heading when it opens (so a keyboard or screen reader user lands in it) and goes back to
  * where it was when it closes; Escape closes it.
  */
-export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWatchlist, onToggleWatchlist, onClose, takeFocus, children }: SymbolDetailProps) {
+export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWatchlist, onToggleWatchlist, onClose, takeFocus, children, side, price }: SymbolDetailProps) {
   const t = useT();
   const { locale } = useIntl();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -58,13 +63,19 @@ export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWat
           {name} · {currency} · {t("table.tickSize")} {decimalFormatter(locale, decimals).format(tickSize)} · {t("table.decimals")} {decimals}
         </span>
         <button type="button" className="symbol-detail-watch" onClick={onToggleWatchlist}>
+          <Icon name={inWatchlist ? "minus" : "plus"} />
           {inWatchlist ? t("watchlist.remove") : t("watchlist.add")}
         </button>
         <button type="button" className="symbol-detail-close" onClick={onClose}>
+          <Icon name="x" />
           {t("chart.close")}
         </button>
       </div>
-      {children}
+      <div className="symbol-detail-price">{price}</div>
+      <div className="symbol-detail-body">
+        <div className="symbol-detail-chart">{children}</div>
+        <div className="symbol-detail-side">{side}</div>
+      </div>
     </section>
   );
 }

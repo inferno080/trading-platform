@@ -11,8 +11,10 @@ import { WatchlistToggle } from "../watchlist/WatchlistToggle";
 import { Workspace } from "../watchlist/Workspace";
 import type { FeedStore } from "./feedStore";
 import { FIRST_INSTRUMENT } from "../chart/series";
+import { OptimizedBook } from "./OptimizedBook";
 import { OptimizedChart } from "./OptimizedChart";
 import { OptimizedMiniChart } from "./OptimizedMiniChart";
+import { OptimizedPriceLine } from "./OptimizedPriceLine";
 import { QuotesGrid } from "./QuotesGrid";
 import { DEFAULT_REFRESH_SECONDS, MAX_REFRESH_SECONDS, parseRefreshSeconds } from "./refresh";
 import { useFeedWorker } from "./useFeedWorker";
@@ -89,6 +91,10 @@ function SelectedChart({
       onToggleWatchlist={onToggleWatchlist}
       onClose={onClose}
       takeFocus={takeFocus}
+      side={<OptimizedBook store={store} decimals={instrument.decimals} refreshMs={refreshMs} frozen={frozen} />}
+      price={
+        <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" refreshMs={refreshMs} frozen={frozen} />
+      }
     >
       <OptimizedChart
         key={id}
@@ -96,6 +102,7 @@ function SelectedChart({
         id={id}
         symbol={row.sym}
         decimals={instrument.decimals}
+        prevClose={instrument.prevClose}
         unavailable={unavailable}
         refreshMs={refreshMs}
         frozen={frozen}
@@ -116,7 +123,7 @@ function Watchlist({ display, ids, onOpen, onRemove }: { display: Display; ids: 
       name: instrument?.name ?? "",
       chart:
         row && instrument ? (
-          <OptimizedMiniChart store={store} id={id} symbol={row.sym} decimals={instrument.decimals} refreshMs={refreshMs} frozen={frozen} />
+          <OptimizedMiniChart store={store} id={id} symbol={row.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} refreshMs={refreshMs} frozen={frozen} />
         ) : (
           <MiniChartLoading />
         ),
@@ -158,7 +165,7 @@ export function OptimizedPage() {
         <button type="button" className="toggle-button" aria-pressed={frozen} onClick={() => setFrozen((f) => !f)}>
           {t("optimized.freeze")}
         </button>
-        <WatchlistToggle count={watchlist.ids.length} open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
+        <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
         <span className="frozen-note" role="status">
           {frozen && t("optimized.frozen")}
         </span>
@@ -170,30 +177,31 @@ export function OptimizedPage() {
 
       <Hud session={session} mode="optimized" refreshSeconds={refreshSeconds} />
 
-      {selectedId !== null && !ready && <SymbolDetailSkeleton />}
-      {ready && selectedId !== null && (
-        <SelectedChart
-          display={display}
-          id={selectedId}
-          unavailable={state.chartUnavailable.includes(selectedId)}
-          inWatchlist={watchlist.ids.includes(selectedId)}
-          onToggleWatchlist={() => watchlist.toggle(selectedId)}
-          onClose={() => choose(null)}
-          takeFocus={userChose}
-        />
-      )}
-
-      {/* The same layout from the first moment: the quotes (or their skeleton) and the watchlist beside them. */}
+      {/* The open chart (70%) beside the watchlist (30%) from the first moment, and the quotes below, across the full width. */}
       <Workspace open={watchlist.open} panel={<Watchlist display={display} ids={watchlist.ids} onOpen={choose} onRemove={watchlist.remove} />}>
-        {ready ? (
-          <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={choose} />
-        ) : (
-          <div role="status">
-            <span className="visually-hidden">{t("table.waiting")}</span>
-            <TableSkeleton />
-          </div>
-        )}
+        {selectedId !== null &&
+          (ready ? (
+            <SelectedChart
+              display={display}
+              id={selectedId}
+              unavailable={state.chartUnavailable.includes(selectedId)}
+              inWatchlist={watchlist.ids.includes(selectedId)}
+              onToggleWatchlist={() => watchlist.toggle(selectedId)}
+              onClose={() => choose(null)}
+              takeFocus={userChose}
+            />
+          ) : (
+            <SymbolDetailSkeleton />
+          ))}
       </Workspace>
+      {ready ? (
+        <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={choose} />
+      ) : (
+        <div role="status">
+          <span className="visually-hidden">{t("table.waiting")}</span>
+          <TableSkeleton />
+        </div>
+      )}
       <Toast toast={watchlist.toast} onDismiss={watchlist.dismissToast} />
     </section>
   );

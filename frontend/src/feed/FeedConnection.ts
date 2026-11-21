@@ -1,7 +1,7 @@
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
 import { appendTick } from "../chart/series";
-import { PROTOCOL_VERSION, type HistoryData, type Quote, type QuoteUpdate, type Rejected } from "../protocol/messages";
-import type { ChartUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
+import { PROTOCOL_VERSION, type HistoryData, type Quote, type QuoteUpdate, type Rejected, type Trade } from "../protocol/messages";
+import type { DepthUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
 
 /** How long to wait for the reference data after the session before reporting that it is late. */
 export const REFERENCE_TIMEOUT_MS = 10_000;
@@ -43,6 +43,8 @@ export class FeedConnection {
   private changedSeries = new Set<number>(); // charts that changed since the last pull
   private requested = new Set<number>(); // instruments whose history was asked for on this connection
   private subscribed = new Set<number>(); // instruments subscribed to on this connection
+  private depth: DepthUpdate | null = null; // the open instrument's newest order book, until the next pull
+  private newTrades: Trade[] = []; // the open instrument's trades since the last pull, oldest first
   private open = false; // the socket is open, so requests can be sent
 
   constructor(
@@ -86,6 +88,8 @@ export class FeedConnection {
   /** The page now shows the price chart of this instrument (or none). */
   select(id: number | null): void {
     this.selectedId = id;
+    this.depth = null; // the book and trades of the old one no longer matter
+    this.newTrades = [];
     this.syncTracking();
   }
 
@@ -112,18 +116,21 @@ export class FeedConnection {
 
   /** The requests that bring the server up to date: histories not yet asked for, and subscriptions added or dropped. */
   private sendTrackingRequests(socket: SocketLike): void {
-    const wanted = this.selectedId === null ? [...this.watched] : [...this.watched, this.selectedId];
+    // The watchlist and the open instrument are all followed: each has its history asked for and is subscribed to (the
+    // open one needs the subscription for its order book and trades). At most five, which is what the server allows.
+    const wanted = new Set(this.watched);
+    if (this.selectedId !== null) wanted.add(this.selectedId);
     for (const id of wanted) {
       if (this.requested.has(id)) continue;
       this.requested.add(id);
       socket.send(encodeClientMessage({ t: "history", id }));
     }
     for (const id of [...this.subscribed]) {
-      if (this.watched.has(id)) continue;
+      if (wanted.has(id)) continue;
       this.subscribed.delete(id);
       socket.send(encodeClientMessage({ t: "unsubscribe", id }));
     }
-    for (const id of this.watched) {
+    for (const id of wanted) {
       if (this.subscribed.has(id)) continue;
       this.subscribed.add(id);
       socket.send(encodeClientMessage({ t: "subscribe", id }));
@@ -140,17 +147,24 @@ export class FeedConnection {
     this.changed.clear();
     const stats = this.stats;
     this.stats = emptyStats();
-    if (this.changedSeries.size === 0) {
-      this.emit({ type: "batch", updates, stats });
-      return;
+    const batch: Extract<WorkerEvent, { type: "batch" }> = { type: "batch", updates, stats };
+    if (this.changedSeries.size > 0) {
+      batch.charts = [];
+      for (const id of this.changedSeries) {
+        const data = this.series.get(id);
+        if (data) batch.charts.push({ id, data: Float64Array.from(data) });
+      }
+      this.changedSeries.clear();
     }
-    const charts: ChartUpdate[] = [];
-    for (const id of this.changedSeries) {
-      const data = this.series.get(id);
-      if (data) charts.push({ id, data: Float64Array.from(data) });
+    if (this.depth) {
+      batch.depth = this.depth;
+      this.depth = null;
     }
-    this.changedSeries.clear();
-    this.emit({ type: "batch", updates, stats, charts });
+    if (this.newTrades.length > 0 && this.selectedId !== null) {
+      batch.trades = { id: this.selectedId, trades: this.newTrades };
+      this.newTrades = [];
+    }
+    this.emit(batch);
   }
 
   private resetState(): void {
@@ -162,6 +176,8 @@ export class FeedConnection {
     this.changedSeries.clear();
     this.requested.clear();
     this.subscribed.clear();
+    this.depth = null;
+    this.newTrades = [];
     this.open = false;
   }
 
@@ -195,8 +211,12 @@ export class FeedConnection {
         this.handleChartReply(message);
         break;
       case "depth":
+        // The ladder of the open instrument is kept (the newest replaces the last); the watchlist's are not shown anywhere.
+        if (message.id === this.selectedId) this.depth = { id: message.id, bids: message.bids, asks: message.asks };
+        break;
       case "trades":
-        break; // sent for the watchlist's subscriptions, but nothing shows them yet
+        if (message.id === this.selectedId) this.newTrades.push(...message.trades);
+        break;
       case "snapshot":
         this.lastSeq = message.seq;
         this.quotes = message.quotes;
