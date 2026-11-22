@@ -1,7 +1,9 @@
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
 import { appendTick } from "../chart/series";
+import { Reconnector } from "./reconnect";
 import {
   PROTOCOL_VERSION,
+  type ChaosAction,
   type Delta,
   type HistoryData,
   type Quote,
@@ -45,7 +47,6 @@ const emptyStats = (): FeedStats => ({ messages: 0, updatesIn: 0, gaps: 0, laten
 export class FeedConnection {
   private socket: SocketLike | null = null;
   private referenceTimer: ReturnType<typeof setTimeout> | undefined;
-  private status: FeedStatus = "connecting";
   private quotes: Quote[] = []; // the full state, by instrument id
   private changed = new Set<number>(); // instruments updated since the last pull
   private lastSeq = -1; // -1 means "waiting for a snapshot": deltas are ignored until one arrives
@@ -59,18 +60,42 @@ export class FeedConnection {
   private depth: DepthUpdate | null = null; // the open instrument's newest order book, until the next pull
   private newTrades: Trade[] = []; // the open instrument's trades since the last pull, oldest first
   private open = false; // the socket is open, so requests can be sent
+  private url = "";
+  private readonly reconnector: Reconnector;
 
   constructor(
     private readonly createSocket: (url: string) => SocketLike,
     private readonly emit: (event: WorkerEvent) => void,
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    // When the connection is lost it is opened again after a growing wait; the page is told when the next attempt will be.
+    this.reconnector = new Reconnector(
+      () => this.openSocket(),
+      (info) => this.emit({ type: "reconnect", ...info }),
+      now,
+    );
+  }
 
-  /** Open a connection, closing any earlier one first so there is only ever one. */
+  /** Open a connection, closing any earlier one first so there is only ever one. If it is lost it is reopened (see Reconnector). */
   connect(url: string): void {
     this.close();
+    this.url = url;
+    this.openSocket();
+  }
+
+  /** Try again now instead of waiting for the next scheduled attempt. */
+  retryNow(): void {
+    this.reconnector.retryNow();
+  }
+
+  /** Ask the server to misbehave on purpose (it affects every client). Without an open connection nothing is sent. */
+  sendChaos(action: ChaosAction, value?: number): void {
+    if (this.open && this.socket) this.socket.send(encodeClientMessage(value === undefined ? { t: "chaos", action } : { t: "chaos", action, value }));
+  }
+
+  private openSocket(): void {
     this.resetState();
-    const socket = this.createSocket(url);
+    const socket = this.createSocket(this.url);
     this.socket = socket;
     socket.binaryType = "arraybuffer";
     this.setStatus("connecting");
@@ -80,16 +105,21 @@ export class FeedConnection {
       this.setStatus("live");
       this.syncTracking(); // whatever was chosen before the connection was up
     };
+    // A socket that closes by itself was lost (a socket closed on purpose has its handlers removed first). Whether it failed
+    // to open or was cut later, the answer is the same: wait, then try again. An error is always followed by a close.
     socket.onclose = () => {
+      clearTimeout(this.referenceTimer);
       this.open = false;
-      this.setStatus(this.status === "error" ? "error" : "closed"); // an error stays an error
+      this.socket = null;
+      this.setStatus("reconnecting");
+      this.reconnector.lost();
     };
-    socket.onerror = () => this.setStatus("error");
     socket.onmessage = (event) => this.handle(socket, event.data);
   }
 
-  /** Close the connection and stop everything it started. */
+  /** Close the connection on purpose, stop everything it started, and stop trying to reconnect. */
   close(): void {
+    this.reconnector.stop();
     clearTimeout(this.referenceTimer);
     const socket = this.socket;
     if (!socket) return;
@@ -206,7 +236,6 @@ export class FeedConnection {
   }
 
   private setStatus(status: FeedStatus): void {
-    this.status = status;
     this.emit({ type: "status", status });
   }
 
@@ -221,6 +250,7 @@ export class FeedConnection {
           this.close();
           return;
         }
+        this.reconnector.succeeded(); // a working connection: the next loss starts again from the shortest wait
         this.emit({ type: "session", session: message });
         // The only reference request of this connection. Without the reply the prices cannot be read.
         socket.send(encodeClientMessage({ t: "reference" }));

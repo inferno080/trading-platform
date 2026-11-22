@@ -83,6 +83,8 @@ describe("navigation and keyboard use", () => {
     cy.realPress("Tab");
     cy.focused().should("have.class", "record-button");
     cy.realPress("Tab");
+    cy.focused().should("match", "summary"); // the chaos controls, a disclosure
+    cy.realPress("Tab");
     cy.focused().should("have.class", "symbol-detail-watch"); // the open chart's buttons
     cy.realPress("Tab");
     cy.focused().should("have.class", "rfq-open");

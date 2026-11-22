@@ -39,20 +39,22 @@ describe("FeedConnection", () => {
     expect(events).to.deep.equal([{ type: "status", status: "connecting" }]);
   });
 
-  it("reports live when the socket opens and closed when the server closes it", () => {
+  it("reports live when the socket opens and reconnecting when the server closes it", () => {
     const { connection, statuses } = setup();
     connection.connect("ws://localhost:1");
     FakeWebSocket.latest.open();
     FakeWebSocket.latest.drop();
-    expect(statuses()).to.deep.equal(["connecting", "live", "closed"]);
+    expect(statuses()).to.deep.equal(["connecting", "live", "reconnecting"]);
+    connection.close();
   });
 
-  it("reports an error, and keeps reporting an error after the socket closes", () => {
+  it("treats a connection that fails to open like one that was lost: it reconnects", () => {
     const { connection, statuses } = setup();
     connection.connect("ws://localhost:1");
     FakeWebSocket.latest.fail();
     FakeWebSocket.latest.drop();
-    expect(statuses()).to.deep.equal(["connecting", "error", "error"]);
+    expect(statuses()).to.deep.equal(["connecting", "reconnecting"]);
+    connection.close();
   });
 
   describe("the session handshake", () => {
@@ -626,5 +628,143 @@ describe("FeedConnection: requests for quotes", () => {
       { type: "rfqQuote", quote },
       { type: "rfqResult", result },
     ]);
+  });
+});
+
+describe("FeedConnection: reconnecting and chaos commands", () => {
+  type Reconnect = Extract<WorkerEvent, { type: "reconnect" }>;
+  const reconnects = (events: WorkerEvent[]) => events.filter((e): e is Reconnect => e.type === "reconnect");
+  const sentMessages = () => FakeWebSocket.latest.sent.map((frame) => decode(frame) as Record<string, unknown>);
+
+  it("reports the next attempt and when it will be made, then opens a new socket at the same address after the wait", () => {
+    cy.clock().then(() => {
+      const { connection, events, statuses } = setup(() => 5000);
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.open();
+      FakeWebSocket.latest.drop();
+      const [first] = reconnects(events);
+      expect(first!.attempt).to.equal(1);
+      expect(first!.retryAt).to.be.within(5500, 6000); // one second, with some of it random
+      expect(statuses().at(-1)).to.equal("reconnecting");
+      expect(FakeWebSocket.instances).to.have.length(1);
+      cy.tick(1000).then(() => {
+        expect(FakeWebSocket.instances).to.have.length(2);
+        expect(FakeWebSocket.latest.url).to.equal("ws://localhost:7");
+        expect(statuses().at(-1)).to.equal("connecting");
+        connection.close();
+      });
+    });
+  });
+
+  it("waits longer after each failed attempt", () => {
+    cy.clock().then(() => {
+      const { connection, events } = setup();
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.drop();
+      cy.tick(1000).then(() => FakeWebSocket.latest.drop()); // the second attempt fails too
+      cy.then(() => expect(reconnects(events).map((e) => e.attempt)).to.deep.equal([1, 2]));
+      cy.tick(2000).then(() => {
+        expect(FakeWebSocket.instances).to.have.length(3);
+        connection.close();
+      });
+    });
+  });
+
+  it("starts again from the first attempt once a connection has worked", () => {
+    cy.clock().then(() => {
+      const { connection, events } = setup();
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.drop();
+      cy.tick(1000).then(() => {
+        FakeWebSocket.latest.open();
+        FakeWebSocket.latest.receive(makeSession());
+        FakeWebSocket.latest.drop();
+        expect(reconnects(events).map((e) => e.attempt)).to.deep.equal([1, 1]);
+        connection.close();
+      });
+    });
+  });
+
+  it("makes the attempt at once when asked to, and not a second one when the wait ends", () => {
+    cy.clock().then(() => {
+      const { connection } = setup();
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.drop();
+      connection.retryNow();
+      expect(FakeWebSocket.instances).to.have.length(2);
+      cy.tick(20_000).then(() => {
+        expect(FakeWebSocket.instances).to.have.length(2);
+        connection.close();
+      });
+    });
+  });
+
+  it("stops trying when the connection is closed on purpose", () => {
+    cy.clock().then(() => {
+      const { connection } = setup();
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.drop();
+      connection.close();
+      cy.tick(20_000).then(() => expect(FakeWebSocket.instances).to.have.length(1));
+    });
+  });
+
+  it("does not retry a server whose protocol it cannot speak", () => {
+    cy.clock().then(() => {
+      const { connection, statuses } = setup();
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.open();
+      FakeWebSocket.latest.receive(makeSession({ v: 1 }));
+      expect(statuses().at(-1)).to.equal("error");
+      cy.tick(20_000).then(() => expect(FakeWebSocket.instances).to.have.length(1));
+    });
+  });
+
+  it("follows the open instrument and the watchlist again on the new connection", () => {
+    cy.clock().then(() => {
+      const { connection } = setup();
+      connection.connect("ws://localhost:7");
+      connection.select(1);
+      connection.watch([2]);
+      FakeWebSocket.latest.open();
+      FakeWebSocket.latest.drop();
+      cy.tick(1000).then(() => {
+        FakeWebSocket.latest.open();
+        expect(sentRequests()).to.include.members(["history 1", "history 2", "subscribe 1", "subscribe 2"]);
+        connection.close();
+      });
+    });
+  });
+
+  it("fails a request for a quote at once while it is reconnecting", () => {
+    cy.clock().then(() => {
+      const { connection, events } = setup();
+      connection.connect("ws://localhost:7");
+      FakeWebSocket.latest.open();
+      FakeWebSocket.latest.drop();
+      connection.requestQuote({ t: "rfq", ref: 3, id: 0, side: "buy", quantity: 10 });
+      expect(events.at(-1)).to.deep.equal({ type: "rfqResult", result: { t: "rfqResult", ref: 3, outcome: "unknown" } });
+      connection.close();
+    });
+  });
+
+  describe("chaos commands", () => {
+    it("sends an action, and the number some actions take", () => {
+      const { connection } = live();
+      connection.sendChaos("pause");
+      connection.sendChaos("latency", 500);
+      expect(sentMessages().slice(-2)).to.deep.equal([
+        { t: "chaos", action: "pause" },
+        { t: "chaos", action: "latency", value: 500 },
+      ]);
+    });
+
+    it("sends nothing without an open connection", () => {
+      const { connection } = setup();
+      connection.connect("ws://localhost:1"); // connecting, not open
+      connection.sendChaos("drop");
+      expect(FakeWebSocket.latest.sent).to.have.length(0);
+      connection.close();
+    });
   });
 });

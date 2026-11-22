@@ -1,7 +1,7 @@
-import type { DepthLevel, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, Trade } from "../protocol/messages";
+import type { ChaosAction, DepthLevel, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, Trade } from "../protocol/messages";
 
 /** Where the connection stands. */
-export type FeedStatus = "connecting" | "live" | "closed" | "error";
+export type FeedStatus = "connecting" | "live" | "reconnecting" | "closed" | "error";
 
 /**
  * The only messages that cross between the page and the Web Worker that owns the connection. They are small on
@@ -43,7 +43,9 @@ export type WorkerCommand =
   | { type: "watch"; ids: number[] } // the instruments on the watchlist: each is subscribed to and has a chart kept up to date
   | { type: "rfq"; request: RfqRequest } // ask the dealer for a quote
   | { type: "rfqAccept"; ref: number } // accept a quote
-  | { type: "rfqReject"; ref: number }; // turn a quote down
+  | { type: "rfqReject"; ref: number } // turn a quote down
+  | { type: "retry" } // do not wait for the next reconnection attempt: make it now
+  | { type: "chaos"; action: ChaosAction; value?: number }; // ask the server to misbehave on purpose
 
 /** From the worker to the page. */
 export type WorkerEvent =
@@ -57,4 +59,5 @@ export type WorkerEvent =
   | { type: "batch"; updates: Quote[]; stats: FeedStats; charts?: ChartUpdate[]; depth?: DepthUpdate; trades?: TradesUpdate } // the latest state of every instrument that changed since the last pull, every tracked chart that changed, and the open instrument's order book and new trades
   | { type: "chartUnavailable"; id: number } // the server has no price history for a tracked instrument
   | { type: "rfqQuote"; quote: RfqQuote } // the dealer's quote for a request
-  | { type: "rfqResult"; result: RfqResult }; // how a request ended
+  | { type: "rfqResult"; result: RfqResult } // how a request ended
+  | { type: "reconnect"; attempt: number; retryAt: number }; // the connection was lost: the next attempt is number `attempt`, made at time `retryAt` (ms, like Date.now())

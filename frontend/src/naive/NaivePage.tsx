@@ -7,6 +7,8 @@ import { PriceLine } from "../components/PriceLine";
 import { MiniChartLoading, SymbolDetailSkeleton } from "../components/skeletons";
 import { Hud } from "../hud/Hud";
 import { useT } from "../i18n/useT";
+import { ChaosPanel } from "../chaos/ChaosPanel";
+import { ConnectionStatus } from "../components/ConnectionStatus";
 import { RfqModal } from "../rfq/RfqModal";
 import type { RfqPort } from "../rfq/bridge";
 import { PROTOCOL_VERSION, type InstrumentReference, type Quote } from "../protocol/messages";
@@ -69,7 +71,7 @@ export function NaivePage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids);
+  const { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids);
   const selectedQuote = selectedId === null ? undefined : quotes[selectedId];
   const selectedInstrument = selectedId === null ? undefined : reference?.get(selectedId);
 
@@ -89,9 +91,7 @@ export function NaivePage() {
     <>
       <div className="toolbar">
         {/* Status is text plus a dot, so it never relies on color alone. */}
-        <span className="status" data-status={status} role="status">
-          {t(`status.${status}`)}
-        </span>
+        <ConnectionStatus status={status} reconnect={reconnect} onRetry={retry} />
         <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
       </div>
       {badVersion !== null && (
@@ -99,6 +99,7 @@ export function NaivePage() {
       )}
       {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
       <Hud session={session} mode="naive" />
+      <ChaosPanel connected={status === "live"} onSend={chaos} />
       {/* The open chart (70%) beside the watchlist (30%), and the quotes below, across the full width. */}
       <Workspace open={watchlist.open} panel={<WatchlistPanel items={items} onOpen={choose} onRemove={watchlist.remove} />}>
         {selectedId !== null && (

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { appendTick, flatten } from "../chart/series";
 import { RfqBridge } from "../rfq/bridge";
+import { Reconnector, type ReconnectInfo } from "../feed/reconnect";
 import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
 import {
   PROTOCOL_VERSION,
+  type ChaosAction,
   type InstrumentReference,
   type Quote,
   type Delta,
@@ -20,7 +22,7 @@ import {
   type Snapshot,
 } from "../protocol/messages";
 
-export type FeedStatus = "connecting" | "live" | "closed" | "error";
+export type FeedStatus = "connecting" | "live" | "reconnecting" | "closed" | "error";
 
 /** How long to wait for the reference data after the session before giving up and saying so. */
 export const REFERENCE_TIMEOUT_MS = 10_000;
@@ -95,6 +97,8 @@ function applyChartReply(
  */
 export function useNaiveFeed(selectedId: number | null = null, watchlist: number[] = NO_IDS) {
   const [status, setStatus] = useState<FeedStatus>("connecting");
+  const [reconnect, setReconnect] = useState<ReconnectInfo | null>(null);
+  const retryNow = useRef<() => void>(() => undefined);
   const [session, setSession] = useState<Session | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [reference, setReference] = useState<ReferenceById | null>(null);
@@ -169,99 +173,128 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
   }, [selectedId, watchlist]);
 
   useEffect(() => {
-    const ws = new WebSocket(WS_URL);
-    ws.binaryType = "arraybuffer";
-    socket.current = ws;
-    let lastSeq = -1; // -1 means "waiting for a snapshot": deltas are ignored until one arrives
     let referenceTimer: number | undefined;
+    // When the connection is lost it is opened again after a growing wait (the same policy as the Optimized tab's worker).
+    const reconnector = new Reconnector(
+      () => open(),
+      (info) => setReconnect(info),
+    );
+    retryNow.current = () => reconnector.retryNow();
 
-    ws.onopen = () => {
-      setStatus("live");
-      requested.current.clear(); // a new connection knows nothing of what was asked before
-      subscribed.current.clear();
-      sync.current();
-    };
-    ws.onclose = () => {
-      setStatus((s) => (s === "error" ? s : "closed"));
-      bridge.emit({ type: "disconnected" });
-    };
-    ws.onerror = () => setStatus("error");
+    function open() {
+      const ws = new WebSocket(WS_URL);
+      ws.binaryType = "arraybuffer";
+      socket.current = ws;
+      let lastSeq = -1; // -1 means "waiting for a snapshot": deltas are ignored until one arrives
+      setStatus("connecting");
 
-    // The messages that are not the market itself: the open instrument's chart, order book and trades, and the dealer's replies.
-    const handleDetail = (msg: Exclude<ReturnType<typeof decodeServerMessage>, Session | ReferenceData | Snapshot | Delta>): void => {
-      switch (msg.t) {
-        case "depth":
-        case "trades":
-          applyBookMessage(msg, openId.current, setBook);
-          break;
-        case "history":
-        case "rejected":
-          applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
-          break;
-        case "rfqQuote":
-          bridge.emit({ type: "quote", quote: msg });
-          break;
-        case "rfqResult":
-          bridge.emit({ type: "result", result: msg });
-          break;
-      }
-    };
+      ws.onopen = () => {
+        setStatus("live");
+        setReconnect(null);
+        requested.current.clear(); // a new connection knows nothing of what was asked before
+        subscribed.current.clear();
+        sync.current();
+      };
+      // A socket that closes by itself was lost (one closed on purpose has its handlers removed first): wait, then try again.
+      ws.onclose = () => {
+        window.clearTimeout(referenceTimer);
+        socket.current = null;
+        setStatus("reconnecting");
+        bridge.emit({ type: "disconnected" });
+        reconnector.lost();
+      };
 
-    ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      const msg = decodeServerMessage(new Uint8Array(event.data));
+      // The messages that are not the market itself: the open instrument's chart, order book and trades, and the dealer's replies.
+      const handleDetail = (msg: Exclude<ReturnType<typeof decodeServerMessage>, Session | ReferenceData | Snapshot | Delta>): void => {
+        switch (msg.t) {
+          case "depth":
+          case "trades":
+            applyBookMessage(msg, openId.current, setBook);
+            break;
+          case "history":
+          case "rejected":
+            applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
+            break;
+          case "rfqQuote":
+            bridge.emit({ type: "quote", quote: msg });
+            break;
+          case "rfqResult":
+            bridge.emit({ type: "result", result: msg });
+            break;
+        }
+      };
 
-      switch (msg.t) {
-        case "session":
-          // Refuse to talk to a server speaking a protocol we don't understand.
-          if (msg.v !== PROTOCOL_VERSION) {
-            setBadVersion(msg.v);
-            setStatus("error");
-            ws.close();
-            return;
-          }
-          setSession(msg);
-          // The only reference request of this connection. Without the reply the prices cannot be read.
-          ws.send(encodeClientMessage({ t: "reference" }));
-          referenceTimer = window.setTimeout(() => setReferenceMissing(true), REFERENCE_TIMEOUT_MS);
-          break;
+      ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        const msg = decodeServerMessage(new Uint8Array(event.data));
 
-        case "reference":
-          window.clearTimeout(referenceTimer);
-          setReferenceMissing(false);
-          setReference(new Map(msg.instruments.map((instrument) => [instrument.id, instrument])));
-          break;
+        switch (msg.t) {
+          case "session":
+            // Refuse to talk to a server speaking a protocol we don't understand.
+            if (msg.v !== PROTOCOL_VERSION) {
+              setBadVersion(msg.v);
+              setStatus("error");
+              ws.onclose = null; // a server this client cannot talk to is not retried
+              ws.close();
+              return;
+            }
+            reconnector.succeeded(); // a working connection: the next loss starts again from the shortest wait
+            setSession(msg);
+            // The only reference request of this connection. Without the reply the prices cannot be read.
+            ws.send(encodeClientMessage({ t: "reference" }));
+            referenceTimer = window.setTimeout(() => setReferenceMissing(true), REFERENCE_TIMEOUT_MS);
+            break;
 
-        case "snapshot":
-          lastSeq = msg.seq;
-          setQuotes(msg.quotes);
-          break;
+          case "reference":
+            window.clearTimeout(referenceTimer);
+            setReferenceMissing(false);
+            setReference(new Map(msg.instruments.map((instrument) => [instrument.id, instrument])));
+            break;
 
-        case "delta":
-          if (lastSeq < 0) return; // gap recovery in progress
-          if (msg.seq !== lastSeq + 1) {
-            // Missed a frame: ask for a fresh snapshot and ignore deltas until it arrives.
-            collector.onGap();
-            lastSeq = -1;
-            ws.send(encodeClientMessage({ t: "resync" }));
-            return;
-          }
-          lastSeq = msg.seq;
-          collector.onDelta(msg.updates.length, Date.now() - msg.ts);
-          setQuotes((previous) => applyUpdates(previous, msg.updates));
-          foldTicks(setCharts, tracked.current, msg.updates);
-          break;
+          case "snapshot":
+            lastSeq = msg.seq;
+            setQuotes(msg.quotes);
+            break;
 
-        default:
-          handleDetail(msg);
-      }
-    };
+          case "delta":
+            if (lastSeq < 0) return; // gap recovery in progress
+            if (msg.seq !== lastSeq + 1) {
+              // Missed a frame: ask for a fresh snapshot and ignore deltas until it arrives.
+              collector.onGap();
+              lastSeq = -1;
+              ws.send(encodeClientMessage({ t: "resync" }));
+              return;
+            }
+            lastSeq = msg.seq;
+            collector.onDelta(msg.updates.length, Date.now() - msg.ts);
+            setQuotes((previous) => applyUpdates(previous, msg.updates));
+            foldTicks(setCharts, tracked.current, msg.updates);
+            break;
 
+          default:
+            handleDetail(msg);
+        }
+      };
+    }
+
+    open();
     return () => {
+      reconnector.stop();
       window.clearTimeout(referenceTimer);
-      ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
-      ws.close();
+      const ws = socket.current;
+      if (ws) {
+        ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
+        ws.close();
+      }
+      socket.current = null;
     };
   }, [bridge]);
 
-  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq: bridge.port };
+  const retry = useCallback(() => retryNow.current(), []);
+  // Ask the server to misbehave on purpose, over this page's own connection (nothing is sent unless it is open).
+  const chaos = useCallback((action: ChaosAction, value?: number) => {
+    const ws = socket.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(encodeClientMessage(value === undefined ? { t: "chaos", action } : { t: "chaos", action, value }));
+  }, []);
+
+  return { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq: bridge.port };
 }
