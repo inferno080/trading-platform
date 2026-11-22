@@ -92,6 +92,10 @@ describe("navigation and keyboard use", () => {
     cy.focused().should("have.class", "rfq-open");
     cy.realPress("Tab");
     cy.focused().should("have.class", "symbol-detail-close");
+    for (let i = 0; i < 5; i++) {
+      cy.realPress("Tab");
+      cy.focused().should("have.class", "range-button"); // the five range buttons below the chart
+    }
     cy.realPress("Tab");
     cy.focused().should("have.class", "table-wrap"); // the scrollable table can be reached and scrolled by keyboard
   });

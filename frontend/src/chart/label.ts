@@ -10,11 +10,7 @@ export function chartLabel(t: Translate, symbol: string, data: ArrayLike<number>
   if (!summary) return symbol;
   const price = decimalFormatter(locale, decimals);
   const scale = 10 ** decimals;
-  return t(range === "5m" ? "chart.summary" : `chart.summary.${range}`, {
-    symbol,
-    last: price.format(summary.last / scale),
-    high: price.format(summary.high / scale),
-    low: price.format(summary.low / scale),
-    minutes: summary.minutes,
-  });
+  const values = { symbol, last: price.format(summary.last / scale), high: price.format(summary.high / scale), low: price.format(summary.low / scale) };
+  // Only the five-minute sentence says how many minutes it covers; the others name their range in words.
+  return range === "5m" ? t("chart.summary", { ...values, minutes: summary.minutes }) : t(`chart.summary.${range}`, values);
 }

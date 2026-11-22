@@ -20,4 +20,17 @@ describe("chartLabel", () => {
     const label = chartLabel(t, "EUR", [0, 123400, 60_000, 123456], 2, "de-DE");
     expect(label).to.contain("1.234,56");
   });
+
+  it("says which range it describes: a message for each, with no minutes, since the range is not the last few minutes", () => {
+    for (const range of ["1d", "1m", "1y", "ytd", "max"] as const) {
+      const label = chartLabel(t, "AAA", [0, 29800, 60_000, 30100], 2, "en-US", range);
+      expect(label, range).to.contain(`chart.summary.${range} `);
+      expect(JSON.parse(label.slice(label.indexOf("{"))), range).to.deep.equal({ symbol: "AAA", last: "301.00", high: "301.00", low: "298.00" });
+    }
+  });
+
+  it("uses the five-minute message when no range is given, or for the five-minute range", () => {
+    expect(chartLabel(t, "AAA", [0, 29800, 60_000, 30100], 2, "en-US")).to.contain("chart.summary {");
+    expect(chartLabel(t, "AAA", [0, 29800, 60_000, 30100], 2, "en-US", "5m")).to.contain("chart.summary {");
+  });
 });

@@ -247,7 +247,7 @@ describe("accessibility of the quote dialog and the chaos controls", () => {
           visitWith({ theme, locale }, tab.url);
           tab.ready();
           waitForChartDrawn();
-          cy.get("summary").click();
+          cy.get("details.chaos summary").click();
           cy.get("details.chaos[open]").should("exist");
           scan();
           cy.get(".rfq-open").click();
@@ -259,3 +259,28 @@ describe("accessibility of the quote dialog and the chaos controls", () => {
     }
   }
 });
+
+// The range buttons below the chart, on both tabs, in each language and theme, on a longer range. Reduced motion, as above.
+describe("accessibility of the range buttons", () => {
+  const TABS = [
+    { name: "Naive", url: NAIVE, ready: waitForLiveTable },
+    { name: "Optimized", url: "/", ready: waitForLiveGrid },
+  ];
+  beforeEach(() => emulateMedia([{ name: "prefers-reduced-motion", value: "reduce" }]));
+
+  for (const tab of TABS) {
+    for (const theme of ["light", "dark"] as const) {
+      for (const locale of ["en-US", "en-GB", "ja-JP"]) {
+        it(`${tab.name}: no violations with a longer range chosen: ${theme} theme, ${locale}`, () => {
+          visitWith({ theme, locale }, tab.url);
+          tab.ready();
+          waitForChartDrawn();
+          cy.get(".range-button").eq(2).click(); // 1Y
+          cy.get("canvas.chart-canvas[data-ready=true]", { timeout: 15_000 }).should("exist");
+          scan();
+        });
+      }
+    }
+  }
+});
+

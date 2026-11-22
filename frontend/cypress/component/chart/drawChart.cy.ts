@@ -220,3 +220,56 @@ describe("readChartColors", () => {
     document.documentElement.style.removeProperty("--color-up");
   });
 });
+
+describe("drawChart: ranges", () => {
+  // The words the chart writes, in order, by listening to the canvas as it draws them.
+  const textsOf = (data: number[], overrides: Partial<ChartView> = {}) => {
+    const { context } = makeCanvas(400, 200);
+    const texts: string[] = [];
+    const fillText = context.fillText.bind(context);
+    context.fillText = (text: string, x: number, y: number) => {
+      texts.push(text);
+      fillText(text, x, y);
+    };
+    drawChart(context, data, view(overrides), TEST_COLORS);
+    return texts;
+  };
+  const DAY = 86_400_000;
+  const oneYear = series(60, (i) => 30000 + i * 10).map((value, i) => (i % 2 === 0 ? Date.UTC(2026, 0, 1) + (i / 2) * 6 * DAY : value));
+
+  it("writes the time axis as times for the five-minute range, and as dates for a longer one", () => {
+    const fiveMinutes = textsOf(rising, { range: "5m" });
+    const year = textsOf(oneYear, { range: "1y" });
+    expect(fiveMinutes.filter((text) => /^\d{2}:\d{2}:\d{2}/.test(text))).to.have.length(4);
+    expect(year.filter((text) => /^[A-Z][a-z]{2} 20\d\d$/.test(text))).to.have.length(4);
+  });
+
+  it("writes the axis dates in the language's own style", () => {
+    expect(textsOf(oneYear, { range: "1y", locale: "en-GB" }).some((text) => /^[A-Z][a-z]{2} 2026$/.test(text))).to.equal(true);
+    expect(textsOf(oneYear, { range: "1y", locale: "ja-JP" }).some((text) => /^2026年\d{1,2}月$/.test(text))).to.equal(true);
+  });
+
+  it("writes only years on the longest range", () => {
+    const max = textsOf(oneYear, { range: "max" });
+    expect(max.filter((text) => /^20\d\d$/.test(text)).length).to.be.greaterThan(1);
+  });
+
+  it("draws the dotted line with the words it is given, at the baseline", () => {
+    const texts = textsOf(oneYear, { range: "1m", prevClose: 30200, prevCloseLabel: "Start" });
+    expect(texts.some((text) => text.startsWith("Start 302.00"))).to.equal(true);
+  });
+
+  it("treats a missing range as the five-minute range", () => {
+    expect(textsOf(rising)).to.deep.equal(textsOf(rising, { range: "5m" }));
+  });
+
+  it("colours a longer chart by its own start, not by the previous close", () => {
+    const { canvas, context } = makeCanvas(400, 200);
+    drawChart(context, rising, view({ range: "1m", prevClose: rising[1]! }), TEST_COLORS); // the baseline passed is where it starts: up
+    expect(countColor(canvas, GREEN)).to.be.greaterThan(100);
+    const down = makeCanvas(400, 200);
+    drawChart(down.context, rising, view({ range: "1m", prevClose: 99_999 }), TEST_COLORS); // a baseline above the end: down
+    expect(countColor(down.canvas, MAGENTA)).to.be.greaterThan(100);
+  });
+});
+

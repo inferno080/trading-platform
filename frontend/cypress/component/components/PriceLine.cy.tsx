@@ -1,12 +1,14 @@
 import { PriceLine } from "../../../src/components/PriceLine";
 import type { PriceSummary } from "../../../src/chart/price";
+import type { HistoryRange } from "../../../src/protocol/messages";
 import { withI18n } from "../../support/render";
 
 const up: PriceSummary = { price: "912.76", direction: 1, percent: "+0.62%", change: "+5.65" };
 const down: PriceSummary = { price: "297.05", direction: -1, percent: "-0.32%", change: "-0.95" };
 const flat: PriceSummary = { price: "298.00", direction: 0, percent: "0.00%", change: "0.00" };
 
-const mountLine = (summary: PriceSummary | null, variant: "big" | "small" = "big") => cy.mount(withI18n(<PriceLine summary={summary} variant={variant} />));
+const mountLine = (summary: PriceSummary | null, variant: "big" | "small" = "big", range?: HistoryRange) =>
+  cy.mount(withI18n(<PriceLine summary={summary} variant={variant} range={range} />));
 const color = (selector: string) => cy.get(selector).then(($e) => getComputedStyle($e[0]!).color);
 const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const toRgb = (hex: string) => {
@@ -105,5 +107,27 @@ describe("PriceLine", () => {
     localStorage.setItem("locale", "ja-JP");
     mountLine(up);
     cy.get(".price-today").should("contain.text", "本日");
+  });
+
+  it("says Today for the live range and for one day, and names the longer ranges instead", () => {
+    for (const range of ["5m", "1d"] as const) {
+      mountLine(up, "big", range);
+      cy.get(".price-today").should("contain.text", "Today");
+    }
+    for (const [range, words] of [
+      ["1m", "1 month"],
+      ["1y", "1 year"],
+      ["ytd", "YTD"],
+      ["max", "All time"],
+    ] as const) {
+      mountLine(up, "big", range);
+      cy.get(".price-today").should("contain.text", words).and("not.contain.text", "Today");
+    }
+  });
+
+  it("names the longer ranges in Japanese", () => {
+    localStorage.setItem("locale", "ja-JP");
+    mountLine(up, "big", "ytd");
+    cy.get(".price-today").should("contain.text", "年初来");
   });
 });

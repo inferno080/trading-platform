@@ -768,3 +768,145 @@ describe("FeedConnection: reconnecting and chaos commands", () => {
     });
   });
 });
+
+describe("FeedConnection: chart ranges", () => {
+  type RangeRequest = { t: string; id: number; range: string };
+  const rangeRequests = () => FakeWebSocket.latest.sent.map((frame) => decode(frame) as RangeRequest).filter((m) => m.t === "history" && m.range);
+  const reply = (id: number, range: string, last = 29920) => ({ ...makeHistory(id, 4, last, 1_000_000), range }) as ReturnType<typeof makeHistory>;
+  const charts = (batch: ReturnType<ReturnType<typeof setup>["lastBatch"]>) => batch.charts ?? [];
+
+  it("asks for the open instrument's chart over the chosen range", () => {
+    const { connection } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    expect(rangeRequests()).to.deep.equal([{ t: "history", id: 1, range: "1m" }]);
+  });
+
+  it("asks for a range once, and not again when it is chosen again or returned to", () => {
+    const { connection } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    connection.setRange("1m");
+    connection.setRange("1y");
+    connection.setRange("1m");
+    expect(rangeRequests().map((m) => m.range)).to.deep.equal(["1m", "1y"]);
+  });
+
+  it("does not ask separately for the five-minute range: it is the tracked chart", () => {
+    const { connection } = live();
+    connection.select(1);
+    connection.setRange("5m");
+    expect(rangeRequests()).to.deep.equal([]);
+  });
+
+  it("asks for nothing while no instrument is open", () => {
+    const { connection } = live();
+    connection.setRange("1y");
+    expect(rangeRequests()).to.deep.equal([]);
+    connection.select(2);
+    expect(rangeRequests()).to.deep.equal([{ t: "history", id: 2, range: "1y" }]);
+  });
+
+  it("waits for the connection to open before asking, and asks when it does", () => {
+    const { connection } = setup();
+    connection.connect("ws://localhost:1");
+    connection.select(2);
+    connection.setRange("ytd");
+    expect(FakeWebSocket.latest.sent).to.have.length(0);
+    FakeWebSocket.latest.open();
+    expect(rangeRequests()).to.deep.equal([{ t: "history", id: 2, range: "ytd" }]);
+  });
+
+  it("asks again for the new instrument when another is opened, on the same range", () => {
+    const { connection } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    connection.select(2);
+    expect(rangeRequests()).to.deep.equal([
+      { t: "history", id: 1, range: "1m" },
+      { t: "history", id: 2, range: "1m" },
+    ]);
+  });
+
+  it("sends a longer chart to the page with its range, as a flat typed list, and not again until it changes", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    FakeWebSocket.latest.receive(reply(1, "1m"));
+    const first = charts(lastBatch()).filter((c) => c.range === "1m");
+    expect(first).to.have.length(1);
+    expect(first[0]!.id).to.equal(1);
+    expect(first[0]!.data).to.be.instanceOf(Float64Array);
+    expect(first[0]!.data).to.have.length(8); // four points, flat
+    expect(charts(lastBatch()).filter((c) => c.range === "1m")).to.have.length(0);
+  });
+
+  it("does not mix it up with the five-minute chart: that has no range, and is its own list", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    FakeWebSocket.latest.receive(makeHistory(1, 3, 29920));
+    FakeWebSocket.latest.receive(reply(1, "1m"));
+    const all = charts(lastBatch());
+    expect(all.find((c) => c.range === undefined)!.data).to.have.length(6);
+    expect(all.find((c) => c.range === "1m")!.data).to.have.length(8);
+  });
+
+  it("ignores a longer chart for an instrument that is not open", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    FakeWebSocket.latest.receive(reply(2, "1m"));
+    expect(charts(lastBatch()).filter((c) => c.range)).to.have.length(0);
+  });
+
+  it("forgets the old instrument's longer charts when another is opened, so one that returns is asked for again", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    FakeWebSocket.latest.receive(reply(1, "1m"));
+    lastBatch();
+    connection.select(2);
+    connection.select(1);
+    expect(rangeRequests().filter((m) => m.id === 1)).to.have.length(2);
+  });
+
+  it("shows the live price in the newest point of a longer chart, and leaves the rest of it alone", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    FakeWebSocket.latest.receive(reply(1, "1m", 29920));
+    lastBatch();
+    FakeWebSocket.latest.receive(makeDelta(6, [makeUpdate(1, { last: 31000, ts: 5_000_000 })]));
+    const chart = charts(lastBatch()).find((c) => c.range === "1m")!;
+    expect(chart.data.at(-1)).to.equal(31000);
+    expect(chart.data[1]).to.equal(29920 - 3 * 10); // the first point is as it was sent
+    expect(chart.data).to.have.length(8); // the price replaced the newest point, it did not add one
+  });
+
+  it("does not touch a longer chart for an update of another instrument", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1m");
+    FakeWebSocket.latest.receive(reply(1, "1m"));
+    lastBatch();
+    FakeWebSocket.latest.receive(makeDelta(6, [makeUpdate(2, { last: 12345 })]));
+    expect(charts(lastBatch()).filter((c) => c.range)).to.have.length(0);
+  });
+
+  it("asks for the range again on a new connection", () => {
+    cy.clock().then(() => {
+      const { connection } = setup();
+      connection.connect("ws://localhost:7");
+      connection.select(1);
+      connection.setRange("1y");
+      FakeWebSocket.latest.open();
+      FakeWebSocket.latest.drop();
+      cy.tick(1000).then(() => {
+        FakeWebSocket.latest.open();
+        expect(rangeRequests()).to.deep.equal([{ t: "history", id: 1, range: "1y" }]);
+        connection.close();
+      });
+    });
+  });
+});

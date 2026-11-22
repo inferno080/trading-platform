@@ -15,10 +15,10 @@ for (const tab of TABS) {
       tab.ready();
     });
 
-    it("opens AAA's chart as the page loads, with its history from the server", () => {
+    it("opens AAA's chart as the page loads, on one day, with its history from the server", () => {
       cy.get("#symbol-detail-title").should("have.text", "AAA price chart");
       waitForChartDrawn();
-      cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("match", /^AAA price over the last [45] minutes: last [\d,.]+, high [\d,.]+, low [\d,.]+\.$/);
+      cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("match", /^AAA price over the last day: last [\d,.]+, high [\d,.]+, low [\d,.]+\.$/);
     });
 
     it("shows the instrument's name, currency, tick size and decimals, which are not columns in the quotes", () => {

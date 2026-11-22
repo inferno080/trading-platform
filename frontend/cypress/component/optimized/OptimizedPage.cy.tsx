@@ -1,6 +1,8 @@
+import type { HistoryRange } from "../../../src/protocol/messages";
 import { OptimizedPage } from "../../../src/optimized/OptimizedPage";
 import { FakeWorker } from "../../support/fakeWorker";
 import { series } from "../../support/canvas";
+import { afterFrames } from "../../support/frames";
 import { makeQuote, makeReference, makeReferenceData, makeSession, makeSnapshot } from "../../support/fixtures";
 import { withFakeWorker, withI18n } from "../../support/render";
 
@@ -222,6 +224,12 @@ const deliverMarketWith = (count: number) => {
 const sendChart = (id: number, last = 29920, count = 60) =>
   worker().then((w) => w.emit({ type: "batch", updates: [], stats: STATS, charts: [{ id, data: Float64Array.from(series(count, (i) => last - (count - 1 - i) * 5)) }] }));
 
+/** The open chart's data: the page opens on one day, so that is the range its chart is drawn from. */
+const sendOpenChart = (id: number, last = 29920, count = 60, range: HistoryRange = "1d") =>
+  worker().then((w) =>
+    w.emit({ type: "batch", updates: [], stats: STATS, charts: [{ id, range, data: Float64Array.from(series(count, (i) => last - (count - 1 - i) * 5)) }] }),
+  );
+
 describe("OptimizedPage: the open chart", () => {
   it("opens AAA's chart as the page loads, and tells the worker", () => {
     mountPage();
@@ -247,7 +255,7 @@ describe("OptimizedPage: the open chart", () => {
     mountPage();
     deliverMarketWith(6);
     cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
-    sendChart(0);
+    sendOpenChart(0);
     cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
     cy.get(".chart-area .chart-overlay").should("not.exist");
   });
@@ -291,6 +299,89 @@ describe("OptimizedPage: the open chart", () => {
     cy.get("section.symbol-detail").should("not.exist");
   });
 
+});
+
+describe("OptimizedPage: chart ranges", () => {
+  const range = (label: string) => cy.contains(".range-button", label).click();
+  const posted = (type: string) => worker().then((w) => w.posted.filter((command) => command.type === type));
+  const label = () => cy.get("canvas.chart-canvas").invoke("attr", "aria-label");
+
+  it("opens on one day, and tells the worker so as soon as it starts", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get('.range-button[aria-pressed="true"]').should("have.text", "1D");
+    posted("range").then((commands) => expect(commands[0]).to.deep.equal({ type: "range", range: "1d" }));
+  });
+
+  it("tells the worker which range was chosen", () => {
+    mountPage();
+    deliverMarketWith(6);
+    range("1Y");
+    posted("range").then((commands) => {
+      expect(commands[0]).to.deep.equal({ type: "range", range: "1d" });
+      expect(commands.at(-1)).to.deep.equal({ type: "range", range: "1y" });
+    });
+  });
+
+  it("shows a skeleton until the range's chart arrives from the worker, then draws it and describes it", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+    sendOpenChart(0, 29920, 60, "1d");
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    label().should("contain", "over the last day").and("contain", "last 299.20");
+  });
+
+  it("does not draw the five-minute chart in the open chart, which shows a day", () => {
+    mountPage();
+    deliverMarketWith(6);
+    sendChart(0, 29920); // the tracked five-minute chart, which the watchlist uses
+    afterFrames(10);
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+  });
+
+  it("shows the skeleton again when another range is chosen and its chart has not arrived, then that range", () => {
+    mountPage();
+    deliverMarketWith(6);
+    refreshBox().clear().type("0");
+    sendOpenChart(0, 29920, 60, "1d");
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    range("1M");
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "false");
+    sendOpenChart(0, 30500, 31, "1m");
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    label().should("contain", "over the last month").and("contain", "last 305.00");
+  });
+
+  it("goes back to a range it already has without asking again, and keeps showing the right one", () => {
+    mountPage();
+    deliverMarketWith(6);
+    refreshBox().clear().type("0");
+    sendOpenChart(0, 29920, 60, "1d");
+    range("1M");
+    sendOpenChart(0, 30500, 31, "1m");
+    label().should("contain", "last 305.00");
+    range("1D");
+    label().should("contain", "over the last day").and("contain", "last 299.20");
+  });
+
+  it("says what the price line measures against: Today for a day, the range for a longer one", () => {
+    mountPage();
+    deliverMarketWith(6);
+    refreshBox().clear().type("0");
+    sendOpenChart(0, 29920, 60, "1d");
+    cy.get(".price-line-big .price-today").should("contain.text", "Today");
+    range("YTD");
+    sendOpenChart(0, 29920, 60, "ytd");
+    cy.get(".price-line-big .price-today").should("contain.text", "YTD");
+  });
+
+  it("says the histories are simulated", () => {
+    mountPage();
+    deliverMarketWith(6);
+    cy.get(".range-note").should("have.text", "Simulated history");
+  });
 });
 
 describe("OptimizedPage: the watchlist", () => {
