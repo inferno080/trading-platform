@@ -99,7 +99,7 @@ All frames are binary MessagePack. Prices are fixed-point integers in **each ins
 - **`reference`** (client to server, then server to that client): `{ t: "reference" }` asks for the reference data, and the server replies with `{ t: "reference", instruments: [...] }`. It is opt-in, so a client that never asks sees exactly the stream it would have seen without this feature. See [Instruments and reference data](#instruments-and-reference-data).
 - **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
 - **`subscribe` / `unsubscribe`** (client to server): `{ t: "subscribe", id }` starts two extra streams for one instrument, to that client only: **`depth`** and **`trades`**. Each client can watch up to `MAX_SUBSCRIPTIONS` instruments (5 by default); beyond that, or for an unknown id, the server replies `{ t: "rejected", request: "subscribe", id, reason }` with `reason` `"limit"` or `"unknown-instrument"`. All of a client's subscriptions end when it disconnects. See [Instrument detail](#instrument-detail-depth-trades-and-history).
-- **`history`** (client to server, then server to that client): `{ t: "history", id }` asks once for an instrument's recent price history. The reply is `{ t: "history", id, points: [[ts, price], ...] }`, oldest first, one point per `HISTORY_INTERVAL_MS`.
+- **`history`** (client to server, then server to that client): `{ t: "history", id, range? }` asks once for an instrument's price history. `range` is one of `"5m"` (the default: the last five minutes, the real buffer, one point per `HISTORY_INTERVAL_MS`), `"1d"`, `"1m"`, `"1y"`, `"ytd"` or `"max"` (made up when asked, see [Longer ranges](#longer-ranges)). The reply is `{ t: "history", id, range, points: [[ts, price], ...] }`, oldest first. An unknown `range` is ignored like any malformed message.
 
 - **`rfq`** (client to server): `{ t: "rfq", ref, id, side, quantity }` asks the simulated dealer for a price for a size. `ref` is the client's own number for the request, which every later message about it carries. The dealer replies with **`rfqQuote`** `{ ref, id, side, quantity, price, screenPrice, validForMs }`, or declines with **`rfqResult`** (below). See [Requests for quotes](#requests-for-quotes-rfq).
 - **`rfqAccept` / `rfqReject`** (client to server): `{ t: "rfqAccept", ref }` takes a quote, `{ t: "rfqReject", ref }` turns it down.
@@ -126,6 +126,20 @@ Prices are wire integers in the instrument's own scale, like quotes. The rungs b
 The depth and trades of a tick travel with that tick's delta: the `latency` chaos command holds them back with it, a `gap` loses them with it, and `pause` stops them. A client that is not keeping up simply misses some, which does no harm, since the next ladder replaces the last one.
 
 The smoke client can exercise it: `SUBSCRIBE=0,1 HISTORY=0 npm run smoke` subscribes to instruments 0 and 1, asks for the history of 0, and prints depth and trade counts each second.
+
+### Longer ranges
+
+The real price buffer only holds five minutes, but a chart can also show a day, a month, a year, the year so far, or the whole life of an instrument. The simulator has no real past, so the server **makes these up when asked** (`backend/src/sim/rangeHistory.ts`), and stores nothing:
+
+| `range` | Covers | Bars |
+| --- | --- | --- |
+| `1d` | the last 24 hours | 5-minute, 289 points. It starts exactly at the previous close, so the dotted "previous close" line begins where the line does |
+| `1m` | the last 30 days | daily, 31 points |
+| `1y` | the last 365 days | daily, 366 points |
+| `ytd` | since 1 January (UTC) | daily |
+| `max` | since the instrument "started trading" | weekly, hundreds of points |
+
+Every series is a random walk run backwards from the current price, so it **always ends at the price on the screen**. Each instrument has its own yearly volatility (15% to 60%) and its own listing date, between 2 and 25 years back, so `max` starts at a **different date for each instrument**. All of it comes from the instrument's number, so it is the same every run, and asking again a moment later gives the same shape (bar times sit on whole multiples of the bar length). Prices stay on the instrument's tick grid and never fall below one tick. The data is simulated, and the page says so beside the range buttons.
 
 ### Requests for quotes (RFQ)
 
@@ -253,6 +267,8 @@ What you see and can change:
 
 **Price and today's move.** Under the open symbol's heading, and on each watchlist tile, the current price is shown large, followed by an arrow and the percentage it has moved since the previous close, then the amount and "Today" in smaller text, for example `912.76  ▲ +0.62%  (+5.65) Today`. The move is green when up and red when down, and the arrow says the same without color. The price is the newest point of the chart's data, so it follows live updates. The chart lines (the big one and the mini ones) are colored by the same comparison, the newest price against the previous close, so a chart is never green while its price is red. A dotted line at the previous close (labelled "Prev close" with its price on the big chart) shows what the color is measured against, and the price axis always includes it. On the Optimized tab only this small component re-renders, at the refresh interval.
 
+**Chart ranges.** Below the chart, buttons choose **1D** (the default), **1M**, **1Y**, **YTD** and **MAX**, on both tabs. All of them are the simulated histories described under [Longer ranges](#longer-ranges), and the row says "Simulated history" beside the buttons. The server's real five-minute buffer is still what the watchlist's mini charts show. A range is asked for once, when it is first shown, and only for the open symbol. The newest point of a longer chart follows the live price, so its price and the line never disagree. The Optimized worker keeps one series per range for the open symbol; the Naive tab keeps them in React state and copies them on every update. The colour, the dotted line and the price move are measured against the **previous close** for 1D (labelled "Prev close", with "Today"), and against **where the range starts** for the longer ones (labelled "Start", with "1 month", "1 year", "YTD" or "All time"). Dates and times on the axis and in the hover label are written by `Intl` in the page's language and order (for example `Nov 21`, `21 Nov` and `11月21日` for a month range; `2016年` on the longest range in Japanese), and a screen reader hears a sentence for the range ("price over the last month: last …, high …, low …").
+
 The chart has price and time axes (prices in the instrument's own decimals), a crosshair with a time and price label on hover, a shimmering skeleton while the history loads, and a sentence for assistive technology (last, high and low over the period). It follows the theme and the language.
 
 **Request a quote.** The open symbol's header has a **Request a quote** button (beside Add to watchlist) that opens a dialog with the ticket: Buy or Sell, a numeric quantity (1 to 1,000,000, checked before anything is sent), and **Request quote**. What the ticket shows follows a small state machine in `frontend/src/rfq/machine.ts` (`idle`, `requesting`, `quoted`, `accepting`, `accepted`, `rejected`, `expired`, `declined`, `failed`). Each state shows only what makes sense in it, and an event that does not fit the current state changes nothing, so an impossible combination (an accept with no quote, a second fill) cannot happen.
@@ -376,5 +392,5 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 - [x] RFQ ticket with a state machine, and a simulated dealer on the backend
 - [x] Reconnect with backoff, and chaos controls in the UI
 - [ ] More languages (de-DE, Arabic right-to-left)
-- [ ] Chart ranges: 1D, 1M, 1Y and YTD (simulated history, generated on request)
+- [x] Chart ranges: 1D, 1M, 1Y, YTD and MAX (simulated history, generated on request)
 - [x] Drift-corrected simulator timing

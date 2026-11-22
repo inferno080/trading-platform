@@ -1013,3 +1013,49 @@ tbody tr {
     grid-column: auto;
   }
 }
+
+/* The range buttons above the chart (see chart/RangeSelector.tsx) */
+.range-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-start: var(--space-2);
+}
+.range-buttons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* Flat text buttons: muted until hovered, and the chosen one sits on a soft, neutral pill (no accent colour). */
+.range-button {
+  min-width: 3.25rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border-color: transparent;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.range-button:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  border-color: transparent;
+}
+/* The chosen range (it is also announced as pressed). */
+.range-button[aria-pressed="true"] {
+  color: var(--color-text);
+  font-weight: 600;
+  background: var(--color-surface-strong);
+  border-color: transparent;
+}
+/* The keyboard still gets a visible ring (WCAG 2.4.7), in the text colour instead of the accent blue; a click leaves none. */
+.range-button:focus-visible {
+  outline-color: var(--color-text);
+}
+.range-button:focus:not(:focus-visible) {
+  outline: none;
+}
+.range-note {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}

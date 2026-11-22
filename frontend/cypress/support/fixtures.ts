@@ -114,6 +114,7 @@ export const makeRow = (overrides: Partial<Row> = {}): Row => ({
 export const makeHistory = (id: number, count = 3, last = 29920, start = 1_000_000): HistoryData => ({
   t: "history",
   id,
+  range: "5m",
   points: Array.from({ length: count }, (_, i): [number, number] => [start + i * 1000, last - (count - 1 - i) * 10]),
 });
 

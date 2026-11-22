@@ -3,6 +3,7 @@ import { useWorkerFactory } from "../feed/FeedWorkerContext";
 import type { FeedStatus, WorkerEvent } from "../feed/messages";
 import type { WorkerLike } from "../feed/FeedWorkerContext";
 import { WS_URL } from "../feed/url";
+import { LIVE_RANGE, type HistoryRange } from "../chart/range";
 import type { ReconnectInfo } from "../feed/reconnect";
 import { collector } from "../hud/collector";
 import type { ChaosAction, Session } from "../protocol/messages";
@@ -101,6 +102,7 @@ export const RESUME_GRACE_MS = 1_000;
 export function useFeedWorker(
   selectedId: number | null = null,
   watchlist: number[] = NO_IDS,
+  range: HistoryRange = LIVE_RANGE,
 ): { state: FeedWorkerState; store: FeedStore; rfq: RfqPort; retry: () => void; chaos: (action: ChaosAction, value?: number) => void } {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
@@ -117,6 +119,7 @@ export function useFeedWorker(
   );
   const selected = useRef(selectedId); // what a worker started later should be told
   const watched = useRef(watchlist);
+  const chosenRange = useRef(range);
 
   useEffect(() => {
     collector.reset(); // start clean: counters from a previously active tab must not leak in
@@ -146,6 +149,7 @@ export function useFeedWorker(
     connection.postMessage({ type: "connect", url: WS_URL });
     if (selected.current !== null) connection.postMessage({ type: "select", id: selected.current });
     if (watched.current.length > 0) connection.postMessage({ type: "watch", ids: watched.current });
+    if (chosenRange.current !== LIVE_RANGE) connection.postMessage({ type: "range", range: chosenRange.current });
 
     let frame = requestAnimationFrame(function onFrame() {
       const now = Date.now();
@@ -185,6 +189,10 @@ export function useFeedWorker(
     store.clearBook(); // the old instrument's order book and trades are not the new one's
     worker.current?.postMessage({ type: "select", id: selectedId });
   }, [selectedId, store]);
+  useEffect(() => {
+    chosenRange.current = range;
+    worker.current?.postMessage({ type: "range", range });
+  }, [range]);
   useEffect(() => {
     watched.current = watchlist;
     worker.current?.postMessage({ type: "watch", ids: watchlist });

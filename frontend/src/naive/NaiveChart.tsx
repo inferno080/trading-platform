@@ -3,6 +3,7 @@ import { useIntl } from "react-intl";
 import { drawChart, readChartColors } from "../chart/drawChart";
 import { useCanvasSize, useThemeVersion } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
+import { baselineFor, baselineIsPrevClose, LIVE_RANGE, type HistoryRange } from "../chart/range";
 import { ChartSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
 
@@ -13,13 +14,15 @@ interface NaiveChartProps {
   /** The flat [time, price, ...] list, or null until the history arrives. */
   data: number[] | null;
   unavailable: boolean;
+  /** How far back the chart goes (the last five minutes when absent). */
+  range?: HistoryRange;
 }
 
 /**
  * DELIBERATELY NAIVE: the chart is drawn in an effect that depends on the data, and the data is React state that
  * changes on every update of the symbol, so the whole chart is redrawn for every tick on the page's own thread.
  */
-export function NaiveChart({ symbol, decimals, prevClose, data, unavailable }: NaiveChartProps) {
+export function NaiveChart({ symbol, decimals, prevClose, data, unavailable, range = LIVE_RANGE }: NaiveChartProps) {
   const t = useT();
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -29,11 +32,17 @@ export function NaiveChart({ symbol, decimals, prevClose, data, unavailable }: N
 
   useEffect(() => {
     const context = canvas.current?.getContext("2d");
-    if (!context || !data || size.width === 0) return;
-    drawChart(context, data, { ...size, decimals, locale, hoverX, prevClose, prevCloseLabel: t("table.prevClose") }, readChartColors());
-  }, [data, size, decimals, prevClose, locale, hoverX, themeVersion, t]);
+    if (!context || size.width === 0) return;
+    if (!data) {
+      context.clearRect(0, 0, size.width, size.height); // another range, whose data has not arrived: show the skeleton, not the last range
+      return;
+    }
+    const baseline = baselineFor(range, data, prevClose);
+    const baselineLabel = t(baselineIsPrevClose(range) ? "table.prevClose" : "chart.rangeStart");
+    drawChart(context, data, { ...size, decimals, locale, range, hoverX, prevClose: baseline, prevCloseLabel: baselineLabel }, readChartColors());
+  }, [data, size, decimals, prevClose, locale, hoverX, themeVersion, t, range]);
 
-  const label = chartLabel(t, symbol, data, decimals, locale); // rebuilt on every update, like everything else in this tab
+  const label = chartLabel(t, symbol, data, decimals, locale, range); // rebuilt on every update, like everything else in this tab
 
   return (
     <div className="chart-area">

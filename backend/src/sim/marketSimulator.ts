@@ -144,6 +144,11 @@ export class MarketSimulator {
     return quote ? { bid: quote.bid, ask: quote.ask, tick: this.tickUnits[id]! } : null;
   }
 
+  /** The previous close of one instrument, as a wire integer. */
+  prevClose(id: number): number {
+    return this.references[id]!.prevClose;
+  }
+
   /** The last traded price of one instrument, as a wire integer. */
   lastPrice(id: number): number {
     return this.quotes[id]!.last;

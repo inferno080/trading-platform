@@ -3,6 +3,7 @@ import { useIntl } from "react-intl";
 import { drawChart, readChartColors } from "../chart/drawChart";
 import { useCanvasSize, useThemeVersion } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
+import { baselineFor, baselineIsPrevClose, LIVE_RANGE, type HistoryRange } from "../chart/range";
 import { ChartSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
 import type { FeedStore } from "./feedStore";
@@ -14,6 +15,8 @@ interface OptimizedChartProps {
   decimals: number;
   prevClose: number;
   unavailable: boolean;
+  /** How far back the chart goes (the last five minutes when absent). */
+  range?: HistoryRange;
   /** How often the chart redraws for new data, in ms (0: every frame). The same setting as the grid's. */
   refreshMs: number;
 }
@@ -26,7 +29,7 @@ const LABEL_EVERY_MS = 1000;
  * current and sends it, the store holds it, and this draws from the store at most once per animation frame, however
  * many updates arrived, so no React render is involved in a tick.
  */
-export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavailable, refreshMs }: OptimizedChartProps) {
+export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavailable, range = LIVE_RANGE, refreshMs }: OptimizedChartProps) {
   const t = useT();
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -46,14 +49,21 @@ export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavail
       frame = 0;
       const element = canvas.current;
       const context = element?.getContext("2d");
-      const data = store.chart(id);
-      if (!element || !context || !data || size.width === 0) return;
-      drawChart(context, data, { ...size, decimals, locale, hoverX: hoverX.current, prevClose, prevCloseLabel: t("table.prevClose") }, readChartColors());
+      const data = store.chart(id, range);
+      if (!element || !context || size.width === 0) return;
+      if (!data) {
+        context.clearRect(0, 0, size.width, size.height); // another range, whose data has not arrived: show the skeleton, not the last range
+        setPainted(false);
+        return;
+      }
+      const baseline = baselineFor(range, data, prevClose);
+      const baselineLabel = t(baselineIsPrevClose(range) ? "table.prevClose" : "chart.rangeStart");
+      drawChart(context, data, { ...size, decimals, locale, range, hoverX: hoverX.current, prevClose: baseline, prevCloseLabel: baselineLabel }, readChartColors());
       drawnAt = performance.now();
       setPainted(true);
       if (performance.now() - labelledAt > LABEL_EVERY_MS) {
         labelledAt = performance.now();
-        element.setAttribute("aria-label", chartLabel(t, symbol, data, decimals, locale));
+        element.setAttribute("aria-label", chartLabel(t, symbol, data, decimals, locale, range));
       }
     };
     scheduleNow.current = () => {
@@ -82,7 +92,7 @@ export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavail
       clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs]);
+  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs, range]);
 
   return (
     <div className="chart-area">

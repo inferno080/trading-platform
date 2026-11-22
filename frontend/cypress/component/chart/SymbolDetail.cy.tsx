@@ -24,6 +24,8 @@ const detail = (overrides: Overrides = {}, handlers: { onClose?: () => void; onT
     side={<p id="side">the book and trades</p>}
     price={<p id="price">912.76</p>}
     ticket={<button id="ticket">Request a quote</button>}
+    range="5m"
+    onRangeChange={cy.stub().as("range")}
   >
     <p id="chart">the chart</p>
   </SymbolDetail>

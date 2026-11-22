@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { baselineFor, DEFAULT_RANGE, LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
 import { useIntl } from "react-intl";
 import { BookPanel } from "../book/BookPanel";
 import { priceSummary } from "../chart/price";
@@ -28,6 +29,8 @@ interface SelectedChartProps {
   quote: Quote | undefined;
   instrument: InstrumentReference | undefined;
   data: number[] | null;
+  range: HistoryRange;
+  onRangeChange: (range: HistoryRange) => void;
   book: Book;
   rfq: RfqPort;
   unavailable: boolean;
@@ -38,7 +41,7 @@ interface SelectedChartProps {
 }
 
 /** The panel with the open symbol's chart: its skeleton until the page knows the symbol, then the panel itself. */
-function SelectedChart({ quote, instrument, data, book, rfq, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
+function SelectedChart({ quote, instrument, data, range, onRangeChange, book, rfq, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
   const { locale } = useIntl();
   if (!quote || !instrument) return <SymbolDetailSkeleton />;
   return (
@@ -52,11 +55,13 @@ function SelectedChart({ quote, instrument, data, book, rfq, unavailable, inWatc
       onToggleWatchlist={onToggleWatchlist}
       onClose={onClose}
       takeFocus={takeFocus}
+      range={range}
+      onRangeChange={onRangeChange}
       side={<BookPanel depth={book.depth} tape={book.tape} decimals={instrument.decimals} />}
       ticket={<RfqModal key={quote.id} port={rfq} instrumentId={quote.id} symbol={quote.sym} decimals={instrument.decimals} />}
-      price={<PriceLine summary={priceSummary(data ?? undefined, instrument.decimals, instrument.prevClose, locale)} variant="big" />}
+      price={<PriceLine summary={priceSummary(data ?? undefined, instrument.decimals, baselineFor(range, data, instrument.prevClose), locale)} variant="big" range={range} />}
     >
-      <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} unavailable={unavailable} />
+      <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} range={range} unavailable={unavailable} />
     </SymbolDetail>
   );
 }
@@ -67,12 +72,13 @@ export function NaivePage() {
   // The chart of the first instrument (AAA, the most active) is open from the start; `userChose` is false until the person picks one.
   const [selectedId, setSelectedId] = useState<number | null>(FIRST_INSTRUMENT);
   const [userChose, setUserChose] = useState(false);
+  const [range, setRange] = useState<HistoryRange>(DEFAULT_RANGE);
   const choose = (id: number | null) => {
     setUserChose(true);
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids);
+  const { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids, range);
   const hud = useHud(session, "naive");
   const selectedQuote = selectedId === null ? undefined : quotes[selectedId];
   const selectedInstrument = selectedId === null ? undefined : reference?.get(selectedId);
@@ -111,7 +117,9 @@ export function NaivePage() {
           <SelectedChart
             quote={selectedQuote}
             instrument={selectedInstrument}
-            data={charts[selectedId] ?? null}
+            data={(range === LIVE_RANGE ? charts[selectedId] : rangeCharts[rangeKey(selectedId, range)]) ?? null}
+            range={range}
+            onRangeChange={setRange}
             book={book}
             rfq={rfq}
             unavailable={chartUnavailable.includes(selectedId)}

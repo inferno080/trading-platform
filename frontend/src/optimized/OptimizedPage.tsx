@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DEFAULT_RANGE, type HistoryRange } from "../chart/range";
 import { SymbolDetail } from "../chart/SymbolDetail";
 import { MiniChartLoading, SymbolDetailSkeleton, TableSkeleton } from "../components/skeletons";
 import { Hud, RecordButton } from "../hud/Hud";
@@ -68,9 +69,13 @@ function SelectedChart({
   onToggleWatchlist,
   onClose,
   takeFocus,
+  range,
+  onRangeChange,
 }: {
   display: Display;
   id: number;
+  range: HistoryRange;
+  onRangeChange: (range: HistoryRange) => void;
   unavailable: boolean;
   inWatchlist: boolean;
   onToggleWatchlist: () => void;
@@ -92,10 +97,12 @@ function SelectedChart({
       onToggleWatchlist={onToggleWatchlist}
       onClose={onClose}
       takeFocus={takeFocus}
+      range={range}
+      onRangeChange={onRangeChange}
       side={<OptimizedBook store={store} decimals={instrument.decimals} refreshMs={refreshMs} />}
       ticket={<RfqModal key={id} port={display.rfq} instrumentId={id} symbol={row.sym} decimals={instrument.decimals} />}
       price={
-        <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" refreshMs={refreshMs} />
+        <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" range={range} refreshMs={refreshMs} />
       }
     >
       <OptimizedChart
@@ -106,8 +113,8 @@ function SelectedChart({
         decimals={instrument.decimals}
         prevClose={instrument.prevClose}
         unavailable={unavailable}
+        range={range}
         refreshMs={refreshMs}
-       
       />
     </SymbolDetail>
   );
@@ -149,7 +156,8 @@ export function OptimizedPage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { state, store, rfq, retry, chaos } = useFeedWorker(selectedId, watchlist.ids);
+  const [range, setRange] = useState<HistoryRange>(DEFAULT_RANGE);
+  const { state, store, rfq, retry, chaos } = useFeedWorker(selectedId, watchlist.ids, range);
   const { status, reconnect, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
   const hud = useHud(session, "optimized", refreshSeconds);
@@ -187,6 +195,8 @@ export function OptimizedPage() {
               onToggleWatchlist={() => watchlist.toggle(selectedId)}
               onClose={() => choose(null)}
               takeFocus={userChose}
+              range={range}
+              onRangeChange={setRange}
             />
           ) : (
             <SymbolDetailSkeleton />
