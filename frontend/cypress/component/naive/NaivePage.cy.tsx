@@ -5,6 +5,7 @@ import { REFERENCE_TIMEOUT_MS } from "../../../src/naive/useNaiveFeed";
 import { FakeWebSocket, installFakeWebSocket } from "../../support/fakeWebSocket";
 import {
   makeDelta,
+  makeDepth,
   makeHistory,
   makeQuote,
   makeReference,
@@ -12,6 +13,7 @@ import {
   makeRejected,
   makeSession,
   makeSnapshot,
+  makeTrades,
   makeUpdate,
 } from "../../support/fixtures";
 import { withI18n } from "../../support/render";
@@ -680,6 +682,31 @@ describe("NaivePage: the watchlist", () => {
       cy.contains("button", "Request a quote").click();
       cy.get("#rfq-quantity").type("10{enter}");
       cy.get(".rfq-message").should("contain.text", "request was cancelled");
+    });
+  });
+
+  describe("the order book and the trades tape", () => {
+    it("shows the open symbol's order book and trades as they arrive, with the newest trade first", () => {
+      goLive();
+      cy.get("table.book").should("not.exist"); // nothing has arrived yet: the skeleton shows
+      cy.then(() => {
+        socket().receive(makeDepth(0));
+        socket().receive(makeTrades(0));
+      });
+      cy.get("table.book tbody tr").should("have.length.greaterThan", 0);
+      cy.get("table.tape tbody tr").should("have.length", 1).and("have.class", "tape-buy");
+      cy.then(() => socket().receive({ ...makeTrades(0), trades: [{ ts: 2, price: 29915, size: 50, side: "sell" }] }));
+      cy.get("table.tape tbody tr").should("have.length", 2).first().should("have.class", "tape-sell");
+    });
+
+    it("ignores the book and trades of an instrument that is not the open one", () => {
+      goLive();
+      cy.then(() => {
+        socket().receive(makeDepth(1));
+        socket().receive(makeTrades(1));
+      });
+      cy.get("table.book").should("not.exist");
+      cy.get("table.tape").should("not.exist");
     });
   });
 });

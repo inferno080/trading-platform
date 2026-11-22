@@ -473,4 +473,30 @@ describe("OptimizedPage: the watchlist", () => {
       cy.get(".rfq-message").should("contain.text", "request was cancelled");
     });
   });
+
+  describe("the order book and the trades tape", () => {
+    const book = (id: number) => ({
+      depth: { id, bids: [[29917, 2700] as [number, number]], asks: [[29921, 3500] as [number, number]] },
+      trades: { id, trades: [{ ts: 1, price: 29920, size: 300, side: "buy" as const }] },
+    });
+
+    it("shows a skeleton until the order book arrives, then the open symbol's book and trades from the worker's batches", () => {
+      mountPage();
+      deliverMarket();
+      cy.get("table.book").should("not.exist");
+      worker().then((w) => w.emit({ type: "batch", updates: [], stats: STATS, depth: book(0).depth, trades: book(0).trades }));
+      cy.get("table.book tbody tr").should("have.length.greaterThan", 0);
+      cy.get("table.tape tbody tr").should("have.length", 1).and("have.class", "tape-buy");
+    });
+
+    it("keeps adding trades to the tape, newest first", () => {
+      mountPage();
+      deliverMarket();
+      worker().then((w) => {
+        w.emit({ type: "batch", updates: [], stats: STATS, depth: book(0).depth, trades: book(0).trades });
+        w.emit({ type: "batch", updates: [], stats: STATS, trades: { id: 0, trades: [{ ts: 2, price: 29915, size: 50, side: "sell" }] } });
+      });
+      cy.get("table.tape tbody tr").should("have.length", 2).first().should("have.class", "tape-sell");
+    });
+  });
 });

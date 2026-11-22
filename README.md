@@ -76,6 +76,10 @@ Set through environment variables:
 | `DEPTH_LEVELS` | `10` | Rungs on each side of the order book |
 | `HISTORY_POINTS` | `300` | Price history points kept per instrument |
 | `HISTORY_INTERVAL_MS` | `1000` | Time between price history points (300 points at 1 s is the last 5 minutes) |
+| `RFQ_VALID_MS` | `10000` | How long a quote from the dealer can be accepted |
+| `RFQ_MAX_QUANTITY` | `1000000` | The largest quantity the dealer quotes |
+| `RFQ_THINK_MS` | `400` | The dealer's base thinking time before quoting (up to 0.8 s more is added, different for each request) |
+| `RFQ_MAX_OPEN` | `3` | Most requests one client may have in progress at once |
 | `ACTIVITY_SKEW` | `1` | How unevenly updates are spread over the symbols: `0` = all equally active, `1` = a few hot symbols produce most of the updates |
 
 Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
@@ -96,6 +100,10 @@ All frames are binary MessagePack. Prices are fixed-point integers in **each ins
 - **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
 - **`subscribe` / `unsubscribe`** (client to server): `{ t: "subscribe", id }` starts two extra streams for one instrument, to that client only: **`depth`** and **`trades`**. Each client can watch up to `MAX_SUBSCRIPTIONS` instruments (5 by default); beyond that, or for an unknown id, the server replies `{ t: "rejected", request: "subscribe", id, reason }` with `reason` `"limit"` or `"unknown-instrument"`. All of a client's subscriptions end when it disconnects. See [Instrument detail](#instrument-detail-depth-trades-and-history).
 - **`history`** (client to server, then server to that client): `{ t: "history", id }` asks once for an instrument's recent price history. The reply is `{ t: "history", id, points: [[ts, price], ...] }`, oldest first, one point per `HISTORY_INTERVAL_MS`.
+
+- **`rfq`** (client to server): `{ t: "rfq", ref, id, side, quantity }` asks the simulated dealer for a price for a size. `ref` is the client's own number for the request, which every later message about it carries. The dealer replies with **`rfqQuote`** `{ ref, id, side, quantity, price, screenPrice, validForMs }`, or declines with **`rfqResult`** (below). See [Requests for quotes](#requests-for-quotes-rfq).
+- **`rfqAccept` / `rfqReject`** (client to server): `{ t: "rfqAccept", ref }` takes a quote, `{ t: "rfqReject", ref }` turns it down.
+- **`rfqResult`** (server to client): how a request ended: `{ ref, outcome, ... }` with `outcome` one of `"filled"` (with `price` and `tradeId`), `"rejected"`, `"expired"`, `"declined"` (with `reason` `"quantity"`, `"unknown-instrument"` or `"busy"`) or `"unknown"` (the server has no such request).
 
 Clients detect a gap when `seq` skips, and respond by sending `resync`.
 
@@ -118,6 +126,18 @@ Prices are wire integers in the instrument's own scale, like quotes. The rungs b
 The depth and trades of a tick travel with that tick's delta: the `latency` chaos command holds them back with it, a `gap` loses them with it, and `pause` stops them. A client that is not keeping up simply misses some, which does no harm, since the next ladder replaces the last one.
 
 The smoke client can exercise it: `SUBSCRIBE=0,1 HISTORY=0 npm run smoke` subscribes to instruments 0 and 1, asks for the history of 0, and prints depth and trade counts each second.
+
+### Requests for quotes (RFQ)
+
+On a real dealing platform a client does not always trade at the price on the screen. For a larger size it asks a dealer for a **request for quote**: the dealer says "I will trade this size at this price, for the next few seconds", and the client takes it or leaves it. The server has a simulated dealer for that (`backend/src/server/rfq.ts`). It is opt-in, like the other detail messages, and a client that never sends `rfq` never hears from it.
+
+1. The client sends `rfq` with a `ref`, the instrument, the side and the quantity.
+2. Bad requests are declined at once with an `rfqResult`: a quantity below 1 or above `RFQ_MAX_QUANTITY` (`"quantity"`), an unknown instrument (`"unknown-instrument"`), or more than `RFQ_MAX_OPEN` requests already in progress (`"busy"`).
+3. Otherwise the dealer "thinks" for `RFQ_THINK_MS` plus up to 0.8 s (a different delay for each request, but the same one for the same `ref`, so it is repeatable), then sends an `rfqQuote`.
+4. The price is the screen price **moved against the client by one tick for every 5,000 shares**, up to 50 ticks: a buy is the ask plus that, a sell is the bid minus that. `screenPrice` is the touch price at that moment, so a client can show how much worse the quote is. A larger size costs more, as in a real market.
+5. The quote stays open for `validForMs`. The client sends `rfqAccept` (result `"filled"`, with a `tradeId`), `rfqReject` (`"rejected"`), or does nothing and the server sends `"expired"`.
+
+**Exactly once.** A request ends exactly once. Accepting twice gives the same `filled` result with the same `tradeId` and does not trade again; accepting after expiry repeats `"expired"`; asking about a `ref` the server does not know gives `"unknown"`. The last 20 results of each client are remembered so these repeats are answered the same way. When a client disconnects, its open quotes and thinking requests are dropped. Prices use the same per-instrument wire scale as everything else.
 
 ### Instruments and reference data
 
@@ -194,6 +214,7 @@ frontend/src/
   shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
   feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
   chart/         the price chart shared by both tabs: data helpers, canvas drawing, the detail panel
+  rfq/           the request-for-quote ticket: its state machine, the port it talks through, and the dialog
   watchlist/     the watchlist panel, its saved state, the toast and the 70/30 layout
   optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
   naive/         the baseline: WebSocket straight into React state, plain table of all rows
@@ -233,6 +254,14 @@ What you see and can change:
 **Price and today's move.** Under the open symbol's heading, and on each watchlist tile, the current price is shown large, followed by an arrow and the percentage it has moved since the previous close, then the amount and "Today" in smaller text, for example `912.76  ▲ +0.62%  (+5.65) Today`. The move is green when up and red when down, and the arrow says the same without color. The price is the newest point of the chart's data, so it follows live updates. The chart lines (the big one and the mini ones) are colored by the same comparison, the newest price against the previous close, so a chart is never green while its price is red. A dotted line at the previous close (labelled "Prev close" with its price on the big chart) shows what the color is measured against, and the price axis always includes it. On the Optimized tab only this small component re-renders, at the refresh interval, and it holds still when frozen.
 
 The chart has price and time axes (prices in the instrument's own decimals), a crosshair with a time and price label on hover, a shimmering skeleton while the history loads, and a sentence for assistive technology (last, high and low over the period). It follows the theme and the language.
+
+**Request a quote.** The open symbol's header has a **Request a quote** button (beside Add to watchlist) that opens a dialog with the ticket: Buy or Sell, a numeric quantity (1 to 1,000,000, checked before anything is sent), and **Request quote**. What the ticket shows follows a small state machine in `frontend/src/rfq/machine.ts` (`idle`, `requesting`, `quoted`, `accepting`, `accepted`, `rejected`, `expired`, `declined`, `failed`). Each state shows only what makes sense in it, and an event that does not fit the current state changes nothing, so an impossible combination (an accept with no quote, a second fill) cannot happen.
+
+When the quote arrives, the ticket shows it in words ("You buy 4,888 AAA at 303.98"), how much worse it is than the screen price, a countdown (a ring and the seconds, turning amber in the last 3 seconds) and **Accept** and **Reject**. The countdown is measured from when the quote reached the page. A quote that runs out shows "The quote expired. The price may have moved." with **Request again**. A request the server does not answer in 8 seconds, or a lost connection, ends as failed; if that happens while accepting, the message says the trade may or may not have been done, so check before trying again. Closing the dialog with a quote open turns it down.
+
+It works with the keyboard alone: Enter in the quantity box sends the request, **Escape turns an open quote down** (and the next Escape closes the dialog), and the dialog keeps focus inside it and gives it back to the button when it closes. When something happens, focus moves to the status, never onto Accept, so a stray Enter cannot trade. A polite live region reads out the quote once when it arrives and warns once when 3 seconds are left.
+
+Both tabs show the same ticket through a small `RfqPort` (request, accept, reject, and a way to listen). The Naive tab sends from the page's own connection; the Optimized tab asks its worker, which owns the connection, and the worker passes the dealer's replies back. On the Naive tab the dealer's reply waits in the same queue as the price updates, behind the page's backlog, so it can arrive late; that is one more thing the worker fixes.
 
 **Watchlist.** Beside the open chart panel (the chart panel has 70% of the width and the watchlist 30%, in a row above the quotes) is a collapsible watchlist, shown or hidden with the **Watchlist** button in the toolbar. When it is collapsed the chart panel uses the whole row, and with no chart open the watchlist spans the row with its cards side by side. The quotes are below, across the full width, on both tabs. From an open chart, **Add to watchlist** puts the symbol on it (and the button becomes **Remove from watchlist**); a fifth symbol is refused with a toast ("The watchlist is full (4 symbols)…"). Each entry has a mini chart with its latest price and how far it moved over the period (an arrow as well as a color), a button that opens its full chart, and a remove button. The list is saved in the browser, so it survives a reload and is shared by both tabs. Everything is reachable by keyboard: the toggle, the add and remove buttons, each entry's buttons, and the toast's Dismiss button; after removing an entry, focus moves to the watchlist heading. The toast does not take focus, is announced politely by screen readers, and stays while the pointer or focus is on it.
 
@@ -338,7 +367,7 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 - [x] Price chart for the open symbol, on both tabs
 - [x] Collapsible watchlist with mini charts and subscribe/unsubscribe, on both tabs
 - [x] Order book and trades tape for the open symbol, on both tabs
-- [ ] RFQ ticket with a state machine
+- [x] RFQ ticket with a state machine, and a simulated dealer on the backend
 - [ ] Reconnect with a connection state machine, and chaos controls in the UI
 - [ ] More languages (de-DE, Arabic right-to-left)
 - [ ] Chart ranges: 1D, 1M, 1Y and YTD (simulated history, generated on request)
