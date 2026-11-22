@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useIntl } from "react-intl";
-import { drawChart, readChartColors } from "../chart/drawChart";
-import { useCanvasSize, useThemeVersion } from "../chart/hooks";
+import { useCanvasSize, useChartColors } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
-import { baselineFor, baselineIsPrevClose, LIVE_RANGE, sessionView, type HistoryRange } from "../chart/range";
+import { paintChart } from "../chart/paint";
+import { LIVE_RANGE, type HistoryRange } from "../chart/range";
 import type { SessionInfo } from "../protocol/messages";
 import { ChartSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
@@ -30,20 +30,14 @@ export function NaiveChart({ symbol, decimals, prevClose, data, unavailable, ran
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(canvas);
-  const themeVersion = useThemeVersion();
+  const colors = useChartColors();
   const [hoverX, setHoverX] = useState<number | null>(null);
 
   useEffect(() => {
     const context = canvas.current?.getContext("2d");
     if (!context || size.width === 0) return;
-    if (!data) {
-      context.clearRect(0, 0, size.width, size.height); // another range, whose data has not arrived: show the skeleton, not the last range
-      return;
-    }
-    const baseline = baselineFor(range, data, prevClose);
-    const baselineLabel = t(baselineIsPrevClose(range) ? "table.prevClose" : "chart.rangeStart");
-    drawChart(context, data, { ...size, decimals, locale, range, ...sessionView(range, session, data[data.length - 2]!), hoverX, prevClose: baseline, prevCloseLabel: baselineLabel }, readChartColors());
-  }, [data, size, decimals, prevClose, locale, hoverX, themeVersion, t, range, session]);
+    paintChart(context, data ?? undefined, { size, decimals, locale, range, session, prevClose, hoverX, t, colors });
+  }, [data, size, decimals, prevClose, locale, hoverX, colors, t, range, session]);
 
   const label = chartLabel(t, symbol, data, decimals, locale, range); // rebuilt on every update, like everything else in this tab
 

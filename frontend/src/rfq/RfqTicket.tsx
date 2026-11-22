@@ -5,104 +5,19 @@ import { useT } from "../i18n/useT";
 import { decimalFormatter, integerFormatter } from "../lib/format";
 import type { Side } from "../protocol/messages";
 import type { RfqPort } from "./bridge";
+import { CountdownRing } from "./CountdownRing";
 import { MAX_QUANTITY, canRequest, type RfqState } from "./machine";
+import { announcementText, bodyText, parseQuantity, worseBy, type Formats } from "./ticketText";
 import { useRfq } from "./useRfq";
 
 /** The last seconds of a quote, when the countdown warns and a screen reader is told once. */
 const LOW_MS = 3000;
-
-/** The quantity typed, as a whole number from 1 to the largest the dealer quotes; null if it is not one. */
-export function parseQuantity(text: string): number | null {
-  const trimmed = text.trim();
-  if (!/^\d+$/.test(trimmed)) return null; // the number input hands over plain digits (or an empty string for anything else)
-  const quantity = Number(trimmed);
-  return quantity >= 1 && quantity <= MAX_QUANTITY ? quantity : null;
-}
-
-/** The ring that empties as a quote runs out. Decorative: the seconds are written beside it. */
-function CountdownRing({ remaining, total }: { remaining: number; total: number }) {
-  const radius = 11;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <svg className="rfq-ring" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true" focusable="false">
-      <circle cx="14" cy="14" r={radius} fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-      <circle
-        cx="14"
-        cy="14"
-        r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - Math.max(0, Math.min(1, remaining / total)))}
-        transform="rotate(-90 14 14)"
-      />
-    </svg>
-  );
-}
 
 export interface TicketProps {
   port: RfqPort;
   instrumentId: number;
   symbol: string;
   decimals: number;
-}
-
-type Translate = ReturnType<typeof useT>;
-interface Formats {
-  price: (wire: number) => string;
-  quantity: (quantity: number) => string;
-}
-
-/** How much worse than the screen price a quote is (zero or less means it is not worse). */
-function worseBy(request: { side: Side }, quote: { price: number; screenPrice: number }): number {
-  return request.side === "buy" ? quote.price - quote.screenPrice : quote.screenPrice - quote.price;
-}
-
-function quotedText(state: Extract<RfqState, { status: "quoted" }>, t: Translate, f: Formats, symbol: string): string {
-  const key = state.request.side === "buy" ? "rfq.youBuy" : "rfq.youSell";
-  return t(key, { quantity: f.quantity(state.request.quantity), symbol, price: f.price(state.quote.price) });
-}
-
-function acceptedText(state: Extract<RfqState, { status: "accepted" }>, t: Translate, f: Formats, symbol: string): string {
-  const key = state.request.side === "buy" ? "rfq.boughtDone" : "rfq.soldDone";
-  return t(key, { quantity: f.quantity(state.request.quantity), symbol, price: f.price(state.price) });
-}
-
-/** The sentence that says where the request stands, or null when there is nothing to say yet. */
-function bodyText(state: RfqState, t: Translate, f: Formats, symbol: string): string | null {
-  switch (state.status) {
-    case "idle":
-      return null;
-    case "requesting":
-      return t("rfq.requesting", { quantity: f.quantity(state.request.quantity), symbol });
-    case "quoted":
-      return quotedText(state, t, f, symbol);
-    case "accepting":
-      return t("rfq.accepting");
-    case "accepted":
-      return acceptedText(state, t, f, symbol);
-    case "rejected":
-      return t("rfq.rejected");
-    case "expired":
-      return t("rfq.expired");
-    case "declined":
-      return t(`rfq.declined.${state.reason}`, { max: MAX_QUANTITY });
-    case "failed":
-      return t(state.whileAccepting ? "rfq.failedAccepting" : "rfq.failed");
-  }
-}
-
-/** What a screen reader is told: the whole quote when it arrives, a warning near the end, otherwise the status itself. */
-function announcementText(state: RfqState, body: string | null, low: boolean, seconds: number, t: Translate, f: Formats, symbol: string): string {
-  if (state.status !== "quoted") return body ?? "";
-  if (low) return t("rfq.announce.low", { seconds });
-  return t(state.request.side === "buy" ? "rfq.announce.quotedBuy" : "rfq.announce.quotedSell", {
-    quantity: f.quantity(state.request.quantity),
-    symbol,
-    price: f.price(state.quote.price),
-    seconds: Math.round(state.quote.validForMs / 1000),
-  });
 }
 
 interface QuoteProps {

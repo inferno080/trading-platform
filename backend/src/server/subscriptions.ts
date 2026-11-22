@@ -1,5 +1,5 @@
 /** What happened to a request to subscribe. */
-export type SubscribeResult = "subscribed" | "already-subscribed" | "limit" | "unknown-instrument";
+type SubscribeResult = "subscribed" | "already-subscribed" | "limit" | "unknown-instrument";
 
 /**
  * Who is watching which instrument. A client subscribes to the instruments it wants detail for (up to a limit), and

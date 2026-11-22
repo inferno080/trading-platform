@@ -1,84 +1,62 @@
-import { useState } from "react";
-import { baselineFor, DEFAULT_RANGE, LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
 import { useIntl } from "react-intl";
 import { BookPanel } from "../book/BookPanel";
 import { priceSummary } from "../chart/price";
-import { SymbolDetail } from "../chart/SymbolDetail";
+import { InstrumentPanel, type ChartControls } from "../chart/InstrumentPanel";
+import { baselineFor, LIVE_RANGE, rangeKey } from "../chart/range";
+import { useOpenChart } from "../chart/useOpenChart";
+import { ChaosPanel } from "../chaos/ChaosPanel";
+import { ConnectionStatus } from "../components/ConnectionStatus";
+import { FeedAlerts } from "../components/FeedAlerts";
 import { PriceLine } from "../components/PriceLine";
 import { MiniChartLoading, SymbolDetailSkeleton } from "../components/skeletons";
-import { Hud, RecordButton } from "../hud/Hud";
+import { ToolbarEnd } from "../components/ToolbarEnd";
+import { Hud } from "../hud/Hud";
 import { useHud } from "../hud/useHud";
-import { useT } from "../i18n/useT";
-import { ChaosPanel } from "../chaos/ChaosPanel";
-import type { SessionInfo } from "../protocol/messages";
-import { ConnectionStatus } from "../components/ConnectionStatus";
-import { RfqModal } from "../rfq/RfqModal";
+import type { InstrumentReference, Quote, SessionInfo } from "../protocol/messages";
 import type { RfqPort } from "../rfq/bridge";
-import { PROTOCOL_VERSION, type InstrumentReference, type Quote } from "../protocol/messages";
 import { Toast } from "../watchlist/Toast";
 import { useWatchlist } from "../watchlist/useWatchlist";
 import { WatchlistPanel, type WatchlistItem } from "../watchlist/WatchlistPanel";
-import { WatchlistToggle } from "../watchlist/WatchlistToggle";
 import { Workspace } from "../watchlist/Workspace";
 import { NaiveChart } from "./NaiveChart";
-import { FIRST_INSTRUMENT } from "../chart/series";
 import { NaiveMiniChart } from "./NaiveMiniChart";
 import { QuotesTable } from "./QuotesTable";
-import { useNaiveFeed, type Book } from "./useNaiveFeed";
+import type { Book } from "./feedState";
+import { useNaiveFeed } from "./useNaiveFeed";
 
-interface SelectedChartProps {
+interface SelectedChartProps extends ChartControls {
   quote: Quote | undefined;
   instrument: InstrumentReference | undefined;
   data: number[] | null;
   session: SessionInfo | undefined;
-  range: HistoryRange;
-  onRangeChange: (range: HistoryRange) => void;
   book: Book;
   rfq: RfqPort;
-  unavailable: boolean;
-  inWatchlist: boolean;
-  onToggleWatchlist: () => void;
-  onClose: () => void;
-  takeFocus: boolean;
 }
 
 /** The panel with the open symbol's chart: its skeleton until the page knows the symbol, then the panel itself. */
-function SelectedChart({ quote, instrument, data, session, range, onRangeChange, book, rfq, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
+function SelectedChart({ quote, instrument, data, session, book, rfq, ...controls }: SelectedChartProps) {
   const { locale } = useIntl();
   if (!quote || !instrument) return <SymbolDetailSkeleton />;
+  const { range, unavailable, ...panel } = controls;
   return (
-    <SymbolDetail
+    <InstrumentPanel
+      id={quote.id}
       symbol={quote.sym}
-      name={instrument.name}
-      currency={instrument.currency}
-      tickSize={instrument.tickSize}
-      decimals={instrument.decimals}
-      inWatchlist={inWatchlist}
-      onToggleWatchlist={onToggleWatchlist}
-      onClose={onClose}
-      takeFocus={takeFocus}
+      instrument={instrument}
+      rfq={rfq}
       range={range}
-      onRangeChange={onRangeChange}
       side={<BookPanel depth={book.depth} tape={book.tape} decimals={instrument.decimals} timeZone={session?.timeZone} />}
-      ticket={<RfqModal key={quote.id} port={rfq} instrumentId={quote.id} symbol={quote.sym} decimals={instrument.decimals} />}
       price={<PriceLine summary={priceSummary(data ?? undefined, instrument.decimals, baselineFor(range, data, instrument.prevClose), locale)} variant="big" range={range} />}
+      {...panel}
     >
       <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} range={range} session={session} unavailable={unavailable} />
-    </SymbolDetail>
+    </InstrumentPanel>
   );
 }
 
 /** The naive iteration: owns its own feed, so it only holds a socket open while its tab is active. */
 export function NaivePage() {
-  const t = useT();
-  // The chart of the first instrument (AAA, the most active) is open from the start; `userChose` is false until the person picks one.
-  const [selectedId, setSelectedId] = useState<number | null>(FIRST_INSTRUMENT);
-  const [userChose, setUserChose] = useState(false);
-  const [range, setRange] = useState<HistoryRange>(DEFAULT_RANGE);
-  const choose = (id: number | null) => {
-    setUserChose(true);
-    setSelectedId(id);
-  };
+  const { selectedId, userChose, range, setRange, choose } = useOpenChart();
   const watchlist = useWatchlist();
   const { sessions, retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids, range);
   const hud = useHud(session, "naive");
@@ -102,15 +80,9 @@ export function NaivePage() {
       <div className="toolbar">
         {/* Status is text plus a dot, so it never relies on color alone. */}
         <ConnectionStatus status={status} reconnect={reconnect} onRetry={retry} />
-        <div className="toolbar-end">
-          <RecordButton hud={hud} />
-          <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
-        </div>
+        <ToolbarEnd hud={hud} watchlistOpen={watchlist.open} onToggleWatchlist={() => watchlist.setOpen(!watchlist.open)} />
       </div>
-      {badVersion !== null && (
-        <p role="alert">{t("error.protocol", { version: badVersion, expected: PROTOCOL_VERSION })}</p>
-      )}
-      {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
+      <FeedAlerts badVersion={badVersion} referenceMissing={referenceMissing} />
       <Hud hud={hud} />
       <ChaosPanel connected={status === "live"} onSend={chaos} />
       {/* The open chart (70%) beside the watchlist (30%), and the quotes below, across the full width. */}

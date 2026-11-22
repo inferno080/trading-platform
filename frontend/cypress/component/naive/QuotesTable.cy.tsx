@@ -1,5 +1,5 @@
 import { QuotesTable } from "../../../src/naive/QuotesTable";
-import type { ReferenceById } from "../../../src/naive/useNaiveFeed";
+import type { ReferenceById } from "../../../src/naive/feedState";
 import { makeQuote, makeReference } from "../../support/fixtures";
 import { withI18n } from "../../support/render";
 

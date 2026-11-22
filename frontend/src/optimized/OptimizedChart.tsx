@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useIntl } from "react-intl";
-import { drawChart, readChartColors } from "../chart/drawChart";
-import { useCanvasSize, useThemeVersion } from "../chart/hooks";
+import { useCanvasSize, useChartColors } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
-import { baselineFor, baselineIsPrevClose, LIVE_RANGE, sessionView, type HistoryRange } from "../chart/range";
+import { paintChart } from "../chart/paint";
+import { LIVE_RANGE, type HistoryRange } from "../chart/range";
 import { ChartSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
 import type { FeedStore } from "./feedStore";
@@ -34,7 +34,7 @@ export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavail
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(canvas);
-  const themeVersion = useThemeVersion();
+  const colors = useChartColors();
   const hoverX = useRef<number | null>(null);
   const schedule = useRef<() => void>(() => undefined); // draw soon, because the data changed: held to the refresh interval
   const scheduleNow = useRef<() => void>(() => undefined); // draw at the next frame, whatever the interval: for the pointer, a resize, a theme
@@ -51,14 +51,11 @@ export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavail
       const context = element?.getContext("2d");
       const data = store.chart(id, range);
       if (!element || !context || size.width === 0) return;
-      if (!data) {
-        context.clearRect(0, 0, size.width, size.height); // another range, whose data has not arrived: show the skeleton, not the last range
-        setPainted(false);
+      const drawn = paintChart(context, data, { size, decimals, locale, range, session: store.session(id), prevClose, hoverX: hoverX.current, t, colors });
+      if (!drawn || !data) {
+        setPainted(false); // another range, whose data has not arrived: the skeleton shows
         return;
       }
-      const baseline = baselineFor(range, data, prevClose);
-      const baselineLabel = t(baselineIsPrevClose(range) ? "table.prevClose" : "chart.rangeStart");
-      drawChart(context, data, { ...size, decimals, locale, range, ...sessionView(range, store.session(id), data[data.length - 2]!), hoverX: hoverX.current, prevClose: baseline, prevCloseLabel: baselineLabel }, readChartColors());
       drawnAt = performance.now();
       setPainted(true);
       if (performance.now() - labelledAt > LABEL_EVERY_MS) {
@@ -92,7 +89,7 @@ export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavail
       clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs, range]);
+  }, [store, id, size, decimals, prevClose, locale, colors, symbol, t, refreshMs, range]);
 
   return (
     <div className="chart-area">

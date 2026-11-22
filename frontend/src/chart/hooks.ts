@@ -1,6 +1,7 @@
-import { useEffect, useState, useSyncExternalStore, type RefObject } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
+import { readChartColors, type ChartColors } from "./drawChart";
 
-export interface CanvasSize {
+interface CanvasSize {
   width: number; // CSS pixels
   height: number;
   dpr: number;
@@ -54,3 +55,14 @@ const subscribeToTheme = (onChange: () => void) => {
 /** A number that changes whenever the theme changes, so a canvas (which does not restyle itself) knows to redraw. */
 export const useThemeVersion = (): number =>
   useSyncExternalStore(subscribeToTheme, () => themeVersion, () => 0);
+
+/**
+ * The colours a chart is drawn in, read from the design tokens once and again only when the theme changes, not on every
+ * drawing (reading them asks the browser to work out styles, which a chart redrawn every frame should not do). The object
+ * is new whenever the theme changes, so a chart that lists it in its effect redraws then.
+ */
+export const useChartColors = (): ChartColors => {
+  const version = useThemeVersion();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the version is what says the tokens changed: reading them is not a function of it
+  return useMemo(() => readChartColors(), [version]);
+};

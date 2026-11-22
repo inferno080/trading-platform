@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { RfqBridge } from "../../../src/rfq/bridge";
-import { RfqTicket, parseQuantity } from "../../../src/rfq/RfqTicket";
+import { RfqTicket } from "../../../src/rfq/RfqTicket";
+import { parseQuantity } from "../../../src/rfq/ticketText";
 import { ANSWER_TIMEOUT_MS } from "../../../src/rfq/useRfq";
 import type { RfqQuote, RfqResult } from "../../../src/protocol/messages";
 import { withI18n } from "../../support/render";

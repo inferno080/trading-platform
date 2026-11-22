@@ -1,0 +1,314 @@
+{
+  "schema": 2,
+  "recordedAt": "2026-11-22T19:26:14.714Z",
+  "mode": "optimized",
+  "build": "production",
+  "commit": "e8eb247",
+  "load": {
+    "instruments": 5000,
+    "updatesPerSecond": 50000,
+    "tickMs": 20,
+    "protocolVersion": 2
+  },
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+    "hardwareConcurrency": 8,
+    "deviceMemoryGb": 8,
+    "devicePixelRatio": 2,
+    "viewport": {
+      "width": 1470,
+      "height": 798
+    }
+  },
+  "settings": {
+    "refreshSeconds": 0,
+    "changedDuringRun": false
+  },
+  "warmupSeconds": 3,
+  "durationSeconds": 30,
+  "tabHidden": false,
+  "summary": {
+    "fpsAvg": 60,
+    "fpsMin": 59.9,
+    "worstFrameMs": 17.7,
+    "messagesPerSecAvg": 50,
+    "updatesPerSecAvg": 49967,
+    "latencyMs": {
+      "p50": 4,
+      "p99": 5
+    },
+    "gaps": 0
+  },
+  "samples": [
+    {
+      "fps": 60,
+      "worstFrameMs": 17,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50025,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50005,
+      "latencyP50": 4,
+      "latencyP99": 11,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.3,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49980,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.1,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50015,
+      "latencyP50": 4,
+      "latencyP99": 12,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49995,
+      "latencyP50": 4,
+      "latencyP99": 6,
+      "gaps": 0
+    },
+    {
+      "fps": 59.9,
+      "worstFrameMs": 17.4,
+      "messagesPerSec": 49.9,
+      "updatesPerSec": 49940,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50040,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50005,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49995,
+      "latencyP50": 4,
+      "latencyP99": 7,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.5,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50030,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49970,
+      "latencyP50": 4,
+      "latencyP99": 6,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50020,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.6,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50000,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.7,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50010,
+      "latencyP50": 4,
+      "latencyP99": 7,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.9,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49980,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50010,
+      "latencyP50": 4,
+      "latencyP99": 8,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49960,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60.1,
+      "worstFrameMs": 17.1,
+      "messagesPerSec": 50.1,
+      "updatesPerSec": 50065,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49965,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.5,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49975,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.4,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50030,
+      "latencyP50": 3,
+      "latencyP99": 8,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50000,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49980,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 49,
+      "updatesPerSec": 49005,
+      "latencyP50": 4,
+      "latencyP99": 6,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50025,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.5,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49970,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 16.8,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50040,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 59.9,
+      "worstFrameMs": 17.2,
+      "messagesPerSec": 50,
+      "updatesPerSec": 49950,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50020,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    },
+    {
+      "fps": 60,
+      "worstFrameMs": 17.5,
+      "messagesPerSec": 50,
+      "updatesPerSec": 50000,
+      "latencyP50": 4,
+      "latencyP99": 5,
+      "gaps": 0
+    }
+  ]
+}

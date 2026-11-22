@@ -15,7 +15,7 @@ const MAX_LISTED_YEARS = 25;
 const MIN_ANNUAL_VOL = 0.15;
 const MAX_ANNUAL_VOL = 0.6;
 
-export interface RangeInput {
+interface RangeInput {
   id: number;
   range: Exclude<HistoryRange, "5m">; // "5m" is the live buffer, not made up
   now: number; // epoch ms
@@ -29,17 +29,17 @@ export interface RangeInput {
 const unitFor = (id: number, salt: number): number => createRng(id * 7919 + salt * 104729 + 1).next();
 
 /** The yearly volatility of one instrument. */
-export const annualVolatility = (id: number): number => MIN_ANNUAL_VOL + (MAX_ANNUAL_VOL - MIN_ANNUAL_VOL) * unitFor(id, 1);
+const annualVolatility = (id: number): number => MIN_ANNUAL_VOL + (MAX_ANNUAL_VOL - MIN_ANNUAL_VOL) * unitFor(id, 1);
 
 /** When one instrument "started trading" (epoch ms): a different date for each, between 2 and 25 years back, the same every run. */
-export const listingTime = (id: number, now: number): number => now - (MIN_LISTED_YEARS + (MAX_LISTED_YEARS - MIN_LISTED_YEARS) * unitFor(id, 2)) * YEAR;
+const listingTime = (id: number, now: number): number => now - (MIN_LISTED_YEARS + (MAX_LISTED_YEARS - MIN_LISTED_YEARS) * unitFor(id, 2)) * YEAR;
+
+/** The ranges made up as a random walk of bars. One day is not one of them: it is a session (see sessionSeries), and "5m" is the real buffer. */
+type LongRange = Exclude<HistoryRange, "5m" | "1d">;
 
 /** Which range each name is: the bar length, and how many bars it covers. YTD and MAX depend on the date, so they are worked out from `now`. */
-function shapeOf(input: RangeInput): { step: number; bars: number } {
-  const { range, now, id } = input;
+function shapeOf(range: LongRange, id: number, now: number): { step: number; bars: number } {
   switch (range) {
-    case "1d":
-      return { step: 5 * MINUTE, bars: 288 }; // not used: a day is a session, see sessionSeries
     case "1m":
       return { step: DAY, bars: 30 };
     case "1y":
@@ -62,7 +62,7 @@ function shapeOf(input: RangeInput): { step: number; bars: number } {
 export function rangeSeries(input: RangeInput): [number, number][] {
   const { id, range, now, last, prevClose, tick } = input;
   if (range === "1d") return sessionSeries(input);
-  const { step, bars } = shapeOf(input);
+  const { step, bars } = shapeOf(range, id, now);
   const rng = createRng(id * 31 + ["1d", "1m", "1y", "ytd", "max"].indexOf(range) + 1);
   const sigma = annualVolatility(id) * Math.sqrt(step / YEAR); // the spread of one bar's log return
 

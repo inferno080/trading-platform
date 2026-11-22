@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useIntl } from "react-intl";
-import { readChartColors } from "../chart/drawChart";
-import { useCanvasSize, useThemeVersion } from "../chart/hooks";
+import { useCanvasSize, useChartColors } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
 import { drawSparkline } from "../chart/sparkline";
 import { MiniChartSkeleton } from "../components/skeletons";
@@ -28,7 +27,7 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, ref
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(canvas);
-  const themeVersion = useThemeVersion();
+  const colors = useChartColors();
   const [painted, setPainted] = useState(false); // the skeleton stays until the chart has really been drawn once
 
   useEffect(() => {
@@ -40,7 +39,7 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, ref
       const context = canvas.current?.getContext("2d");
       const data = store.chart(id);
       if (!context || !data || size.width === 0) return;
-      drawSparkline(context, data, size, readChartColors(), prevClose);
+      drawSparkline(context, data, size, colors, prevClose);
       drawnAt = performance.now();
       setPainted(true);
       canvas.current?.setAttribute("aria-label", chartLabel(t, symbol, data, decimals, locale));
@@ -67,7 +66,7 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, ref
       clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs]);
+  }, [store, id, size, decimals, prevClose, locale, colors, symbol, t, refreshMs]);
 
   return (
     <div className="mini-chart">

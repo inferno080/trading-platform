@@ -1,137 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
-import { appendTick, flatten } from "../chart/series";
 import { RfqBridge } from "../rfq/bridge";
 import { Reconnector, type ReconnectInfo } from "../feed/reconnect";
 import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
-import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
+import { encodeClientMessage, tryDecodeServerMessage } from "../protocol/codec";
 import {
   PROTOCOL_VERSION,
   type ChaosAction,
-  type InstrumentReference,
-  type SessionInfo,
-  type Quote,
   type Delta,
-  type Depth,
-  type HistoryData,
-  type QuoteUpdate,
+  type Quote,
   type ReferenceData,
-  type Rejected,
-  type Trade,
-  type Trades,
+  type ServerMessage,
   type Session,
+  type SessionInfo,
   type Snapshot,
 } from "../protocol/messages";
+import {
+  applyBookMessage,
+  applyChartReply,
+  applyRangeReply,
+  applyUpdates,
+  foldRanges,
+  foldTicks,
+  onlySessionOf,
+  type Book,
+  type Charts,
+  type RangeCharts,
+  type ReferenceById,
+} from "./feedState";
 
 export type FeedStatus = "connecting" | "live" | "reconnecting" | "closed" | "error";
 
 /** How long to wait for the reference data after the session before giving up and saying so. */
 export const REFERENCE_TIMEOUT_MS = 10_000;
 
-/** Reference data by instrument id. */
-export type ReferenceById = ReadonlyMap<number, InstrumentReference>;
-
-/** Naive on purpose: copies the whole array on every frame, then replaces the quotes that changed. */
-export const applyUpdates = (quotes: Quote[], updates: QuoteUpdate[]): Quote[] => {
-  const next = quotes.slice();
-  for (const update of updates) {
-    const current = next[update.id];
-    if (current) next[update.id] = { ...current, ...update };
-  }
-  return next;
-};
-
-/** The price charts of the tracked instruments (the open one and the watchlist's), by instrument id. */
-export type Charts = Record<number, number[]>;
-
-/** The open instrument's longer charts (a day, a month ...), by instrument and range. */
-export type RangeCharts = Record<string, number[]>;
-
-/** How many recent trades the tape keeps. */
-const TAPE_LENGTH = 30;
-
-/** The open instrument's order book and recent trades (newest first). */
-export interface Book {
-  depth: Depth | null;
-  tape: Trade[];
-}
-
 const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
-
-/** Naive: a longer chart of the open instrument is copied, with its newest point set to the live price, on every update. */
-function foldRanges(setRanges: (update: (previous: RangeCharts) => RangeCharts) => void, open: number | null, updates: QuoteUpdate[]): void {
-  if (open === null) return;
-  for (const update of updates) {
-    if (update.id !== open) continue;
-    setRanges((previous) => {
-      const keys = Object.keys(previous).filter((key) => key.startsWith(`${open}:`));
-      if (keys.length === 0) return previous;
-      const next = { ...previous };
-      for (const key of keys) {
-        const data = previous[key]!.slice();
-        data[data.length - 1] = update.last;
-        next[key] = data;
-      }
-      return next;
-    });
-  }
-}
-
-/** The sessions with only the open instrument's kept (the same object when nothing changes, so the page does not render again). */
-function onlySessionOf(sessions: Record<number, SessionInfo>, open: number | null): Record<number, SessionInfo> {
-  const keep = open !== null ? sessions[open] : undefined;
-  if (keep) return Object.keys(sessions).length === 1 ? sessions : { [open!]: keep };
-  return Object.keys(sessions).length === 0 ? sessions : {};
-}
-
-/** A longer chart for the open instrument arrived: keep it. Returns false for a reply that is not one (the five-minute chart, or a refusal). */
-function applyRangeReply(
-  msg: HistoryData | Rejected,
-  open: number | null,
-  setRanges: (update: (previous: RangeCharts) => RangeCharts) => void,
-  setSessions: (update: (previous: Record<number, SessionInfo>) => Record<number, SessionInfo>) => void,
-): boolean {
-  if (msg.t !== "history" || !msg.range || msg.range === LIVE_RANGE) return false;
-  if (msg.id !== open) return true;
-  setRanges((previous) => ({ ...previous, [rangeKey(msg.id, msg.range)]: flatten(msg.points) }));
-  const { session } = msg;
-  if (session) setSessions((previous) => ({ ...previous, [msg.id]: session }));
-  return true;
-}
-
-/** Naive: every update of a tracked instrument copies its whole chart (and the lot of them) and sets state again. */
-function foldTicks(setCharts: (update: (previous: Charts) => Charts) => void, tracked: ReadonlySet<number>, updates: QuoteUpdate[]): void {
-  for (const update of updates) {
-    if (!tracked.has(update.id)) continue;
-    setCharts((previous) => {
-      const current = previous[update.id];
-      if (!current) return previous; // its history has not arrived yet
-      const data = current.slice();
-      appendTick(data, update.ts, update.last);
-      return { ...previous, [update.id]: data };
-    });
-  }
-}
-
-/** Naive: each order book and each batch of trades makes a new book, with the trades copied in front of the old tape. */
-function applyBookMessage(msg: Depth | Trades, open: number | null, setBook: (update: (previous: Book) => Book) => void): void {
-  if (msg.id !== open) return; // for an instrument that is not the open one
-  if (msg.t === "depth") setBook((previous) => ({ ...previous, depth: msg }));
-  else setBook((previous) => ({ ...previous, tape: [...msg.trades.slice().reverse(), ...previous.tape].slice(0, TAPE_LENGTH) }));
-}
-
-/** The server's answer to a request for a tracked instrument's history: the data, or a refusal. */
-function applyChartReply(
-  msg: HistoryData | Rejected,
-  tracked: ReadonlySet<number>,
-  setCharts: (update: (previous: Charts) => Charts) => void,
-  setUnavailable: (update: (previous: number[]) => number[]) => void,
-): void {
-  if (!tracked.has(msg.id)) return; // an answer for an instrument that is no longer tracked
-  if (msg.t === "history") setCharts((previous) => ({ ...previous, [msg.id]: flatten(msg.points) }));
-  else if (msg.request === "history") setUnavailable((previous) => (previous.includes(msg.id) ? previous : [...previous, msg.id]));
-}
 
 /**
  * DELIBERATELY NAIVE baseline: every WebSocket message goes straight into React state,
@@ -278,7 +182,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
       };
 
       // The messages that are not the market itself: the open instrument's chart, order book and trades, and the dealer's replies.
-      const handleDetail = (msg: Exclude<ReturnType<typeof decodeServerMessage>, Session | ReferenceData | Snapshot | Delta>): void => {
+      const handleDetail = (msg: Exclude<ServerMessage, Session | ReferenceData | Snapshot | Delta>): void => {
         switch (msg.t) {
           case "depth":
           case "trades":
@@ -298,7 +202,8 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
       };
 
       ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-        const msg = decodeServerMessage(new Uint8Array(event.data));
+        const msg = tryDecodeServerMessage(new Uint8Array(event.data));
+        if (!msg) return; // not a message this client knows: ignored
 
         switch (msg.t) {
           case "session":

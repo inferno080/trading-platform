@@ -19,7 +19,7 @@ export interface Quote {
   receivedAt: number;
 }
 
-export type DeclineReason = "quantity" | "unknown-instrument" | "busy";
+type DeclineReason = "quantity" | "unknown-instrument" | "busy";
 
 /**
  * Where a request for a quote is, as one of a few states. Each state carries exactly what makes sense in it, so an

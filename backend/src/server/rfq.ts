@@ -7,7 +7,7 @@ const MAX_IMPACT_TICKS = 50;
 /** How many finished requests are remembered per client, so asking about one again gets the same answer. */
 const REMEMBERED = 20;
 
-export interface RfqSettings {
+interface RfqSettings {
   validMs: number;
   maxQuantity: number;
   thinkMs: number;
@@ -15,7 +15,7 @@ export interface RfqSettings {
 }
 
 /** What the desk needs to know about the market: the best bid, ask and tick of an instrument, or null if there is none. */
-export type ScreenOf = (id: number) => { bid: number; ask: number; tick: number } | null;
+type ScreenOf = (id: number) => { bid: number; ask: number; tick: number } | null;
 
 interface OpenQuote {
   quote: RfqQuote;
@@ -24,7 +24,7 @@ interface OpenQuote {
 }
 
 /** The price a dealer asks for a size: the screen price, moved against the client by one tick per 5,000 shares. */
-export function priceFor(side: Side, screen: { bid: number; ask: number; tick: number }, quantity: number): number {
+function priceFor(side: Side, screen: { bid: number; ask: number; tick: number }, quantity: number): number {
   const impact = Math.min(MAX_IMPACT_TICKS, Math.floor(quantity / QUANTITY_PER_TICK)) * screen.tick;
   return side === "buy" ? screen.ask + impact : Math.max(screen.tick, screen.bid - impact);
 }

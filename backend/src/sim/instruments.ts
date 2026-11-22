@@ -4,7 +4,7 @@
  */
 
 /** One group of instruments and how its prices look. */
-export interface InstrumentClass {
+interface InstrumentClass {
   currency: string;
   decimals: number; // decimal places of a price; a wire price is an integer counting units of 10^-decimals
   tickSize: number; // smallest allowed price move, in real price units

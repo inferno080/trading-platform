@@ -30,7 +30,7 @@ const symbolFor = (i: number): string => {
 };
 
 /** A trade, and which instrument it was in. */
-export interface TradeEvent extends Trade {
+interface TradeEvent extends Trade {
   id: number;
 }
 

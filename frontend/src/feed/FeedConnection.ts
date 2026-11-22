@@ -1,6 +1,6 @@
-import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
-import { LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
-import { appendTick, flatten } from "../chart/series";
+import { encodeClientMessage, tryDecodeServerMessage } from "../protocol/codec";
+import type { HistoryRange } from "../chart/range";
+import { ChartTracker } from "./ChartTracker";
 import { Reconnector } from "./reconnect";
 import {
   PROTOCOL_VERSION,
@@ -14,17 +14,16 @@ import {
   type RfqRequest,
   type ServerMessage,
   type Session,
-  type SessionInfo,
   type Snapshot,
   type Trade,
 } from "../protocol/messages";
-import type { ChartUpdate, DepthUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
+import type { DepthUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
 
 /** How long to wait for the reference data after the session before reporting that it is late. */
 export const REFERENCE_TIMEOUT_MS = 10_000;
 
 /** The parts of a WebSocket the connection uses. The real WebSocket and the fake used in tests both fit. */
-export interface SocketLike {
+interface SocketLike {
   binaryType: string;
   onopen: ((event: Event) => void) | null;
   onclose: ((event: CloseEvent) => void) | null;
@@ -53,20 +52,10 @@ export class FeedConnection {
   private changed = new Set<number>(); // instruments updated since the last pull
   private lastSeq = -1; // -1 means "waiting for a snapshot": deltas are ignored until one arrives
   private stats: FeedStats = emptyStats();
-  private selectedId: number | null = null; // the instrument whose price chart the page shows
-  private watched = new Set<number>(); // the instruments on the watchlist
-  private series = new Map<number, number[]>(); // a chart per tracked instrument: the flat [time, price, ...] list, once its history has arrived
-  private changedSeries = new Set<number>(); // charts that changed since the last pull
-  private requested = new Set<number>(); // instruments whose history was asked for on this connection
-  private subscribed = new Set<number>(); // instruments subscribed to on this connection
   private depth: DepthUpdate | null = null; // the open instrument's newest order book, until the next pull
   private newTrades: Trade[] = []; // the open instrument's trades since the last pull, oldest first
   private open = false; // the socket is open, so requests can be sent
-  private range: HistoryRange = LIVE_RANGE; // how far back the open chart goes
-  private rangeSeries = new Map<string, number[]>(); // the open instrument's longer charts, by instrument and range: the flat [time, price, ...] list
-  private changedRanges = new Set<string>(); // longer charts that changed since the last pull
-  private requestedRanges = new Set<string>(); // longer charts asked for on this connection
-  private sessions = new Map<number, SessionInfo>(); // the market session each open instrument's longer charts were made for, until sent
+  private readonly tracker = new ChartTracker(); // what the page follows, and the charts kept for it
   private url = "";
   private readonly reconnector: Reconnector;
 
@@ -137,7 +126,7 @@ export class FeedConnection {
 
   /** The page now shows the price chart of this instrument (or none). */
   select(id: number | null): void {
-    this.selectedId = id;
+    this.tracker.select(id);
     this.depth = null; // the book and trades of the old one no longer matter
     this.newTrades = [];
     this.syncTracking();
@@ -145,73 +134,20 @@ export class FeedConnection {
 
   /** The open chart now goes back this far (the last five minutes, a day, a month ...): ask the server for that range of the open instrument. */
   setRange(range: HistoryRange): void {
-    this.range = range;
+    this.tracker.setRange(range);
     this.syncTracking();
   }
 
   /** The watchlist is now these instruments: new ones are subscribed to, removed ones unsubscribed from. */
   watch(ids: number[]): void {
-    this.watched = new Set(ids);
+    this.tracker.watch(ids);
     this.syncTracking();
   }
 
-  private isTracked(id: number): boolean {
-    return id === this.selectedId || this.watched.has(id);
-  }
-
-  /**
-   * Make what the server knows match what the page wants: ask for the history of each tracked instrument once, forget
-   * the charts of instruments no longer tracked, and subscribe to the watchlist (and unsubscribe from what left it).
-   * Requests are only sent while the socket is open; anything left over is sent when it opens.
-   */
+  /** Send the requests that bring the server up to date. They are only sent while the socket is open; anything left over is sent when it opens. */
   private syncTracking(): void {
-    for (const id of [...this.series.keys()]) if (!this.isTracked(id)) this.series.delete(id);
-    for (const id of [...this.requested]) if (!this.isTracked(id)) this.requested.delete(id);
-    this.forgetOtherRanges();
-    if (this.open && this.socket) {
-      this.sendTrackingRequests(this.socket);
-      this.requestRange(this.socket);
-    }
-  }
-
-  /** Longer charts are only kept for the open instrument: those of any other are forgotten. */
-  private forgetOtherRanges(): void {
-    const prefix = this.selectedId === null ? null : `${this.selectedId}:`;
-    for (const key of [...this.rangeSeries.keys()]) if (!prefix || !key.startsWith(prefix)) this.rangeSeries.delete(key);
-    for (const key of [...this.requestedRanges]) if (!prefix || !key.startsWith(prefix)) this.requestedRanges.delete(key);
-    for (const id of [...this.sessions.keys()]) if (id !== this.selectedId) this.sessions.delete(id);
-  }
-
-  /** Ask for the open instrument's chart over the chosen range, once (the last five minutes is handled with the tracked charts). */
-  private requestRange(socket: SocketLike): void {
-    if (this.selectedId === null || this.range === LIVE_RANGE) return;
-    const key = rangeKey(this.selectedId, this.range);
-    if (this.requestedRanges.has(key)) return;
-    this.requestedRanges.add(key);
-    socket.send(encodeClientMessage({ t: "history", id: this.selectedId, range: this.range }));
-  }
-
-  /** The requests that bring the server up to date: histories not yet asked for, and subscriptions added or dropped. */
-  private sendTrackingRequests(socket: SocketLike): void {
-    // The watchlist and the open instrument are all followed: each has its history asked for and is subscribed to (the
-    // open one needs the subscription for its order book and trades). At most five, which is what the server allows.
-    const wanted = new Set(this.watched);
-    if (this.selectedId !== null) wanted.add(this.selectedId);
-    for (const id of wanted) {
-      if (this.requested.has(id)) continue;
-      this.requested.add(id);
-      socket.send(encodeClientMessage({ t: "history", id }));
-    }
-    for (const id of [...this.subscribed]) {
-      if (wanted.has(id)) continue;
-      this.subscribed.delete(id);
-      socket.send(encodeClientMessage({ t: "unsubscribe", id }));
-    }
-    for (const id of wanted) {
-      if (this.subscribed.has(id)) continue;
-      this.subscribed.add(id);
-      socket.send(encodeClientMessage({ t: "subscribe", id }));
-    }
+    if (!this.open || !this.socket) return;
+    for (const message of this.tracker.requests()) this.socket.send(encodeClientMessage(message));
   }
 
   /** Ask the dealer for a quote. If there is no open connection, the request cannot be made, and the page is told so. */
@@ -236,35 +172,18 @@ export class FeedConnection {
     const stats = this.stats;
     this.stats = emptyStats();
     const batch: Extract<WorkerEvent, { type: "batch" }> = { type: "batch", updates, stats };
-    const charts = this.takeCharts();
+    const charts = this.tracker.takeCharts();
     if (charts.length > 0) batch.charts = charts;
     if (this.depth) {
       batch.depth = this.depth;
       this.depth = null;
     }
-    if (this.newTrades.length > 0 && this.selectedId !== null) {
-      batch.trades = { id: this.selectedId, trades: this.newTrades };
+    const open = this.tracker.selectedId;
+    if (this.newTrades.length > 0 && open !== null) {
+      batch.trades = { id: open, trades: this.newTrades };
       this.newTrades = [];
     }
     this.emit(batch);
-  }
-
-  /** The charts that changed since the last pull: the tracked five-minute charts, and the open instrument's longer ones. */
-  private takeCharts(): ChartUpdate[] {
-    const charts: ChartUpdate[] = [];
-    for (const id of this.changedSeries) {
-      const data = this.series.get(id);
-      if (data) charts.push({ id, data: Float64Array.from(data) });
-    }
-    this.changedSeries.clear();
-    for (const key of this.changedRanges) {
-      const data = this.rangeSeries.get(key);
-      const [id, range] = key.split(":");
-      const session = this.sessions.get(Number(id));
-      if (data) charts.push({ id: Number(id), range: range as HistoryRange, ...(session ? { session } : {}), data: Float64Array.from(data) });
-    }
-    this.changedRanges.clear();
-    return charts;
   }
 
   private resetState(): void {
@@ -272,14 +191,7 @@ export class FeedConnection {
     this.changed.clear();
     this.lastSeq = -1;
     this.stats = emptyStats();
-    this.series.clear(); // asked for again once the new connection is open
-    this.changedSeries.clear();
-    this.rangeSeries.clear();
-    this.changedRanges.clear();
-    this.sessions.clear();
-    this.requestedRanges.clear();
-    this.requested.clear();
-    this.subscribed.clear();
+    this.tracker.reset(); // asked for again once the new connection is open
     this.depth = null;
     this.newTrades = [];
     this.open = false;
@@ -290,7 +202,8 @@ export class FeedConnection {
   }
 
   private handle(socket: SocketLike, data: ArrayBuffer): void {
-    const message = decodeServerMessage(new Uint8Array(data));
+    const message = tryDecodeServerMessage(new Uint8Array(data));
+    if (!message) return; // not a message this client knows: ignored, like any unknown one
     switch (message.t) {
       case "session":
         if (message.v !== PROTOCOL_VERSION) {
@@ -333,10 +246,10 @@ export class FeedConnection {
         break;
       case "depth":
         // The ladder of the open instrument is kept (the newest replaces the last); the watchlist's are not shown anywhere.
-        if (message.id === this.selectedId) this.depth = { id: message.id, bids: message.bids, asks: message.asks };
+        if (message.id === this.tracker.selectedId) this.depth = { id: message.id, bids: message.bids, asks: message.asks };
         break;
       case "trades":
-        if (message.id === this.selectedId) this.newTrades.push(...message.trades);
+        if (message.id === this.tracker.selectedId) this.newTrades.push(...message.trades);
         break;
       case "rfqQuote":
         this.emit({ type: "rfqQuote", quote: message });
@@ -366,58 +279,12 @@ export class FeedConnection {
       Object.assign(current, update);
       this.changed.add(update.id);
     }
-    this.foldIntoCharts(updates);
-    this.foldIntoRanges(updates);
+    this.tracker.fold(updates);
   }
 
-  /** The server's answer to a request for a tracked instrument's history: the data, or that there is none. */
+  /** The server's answer to a request for a chart: stored by the tracker, and the page is told if there is no history for an instrument. */
   private handleChartReply(message: HistoryData | Rejected): void {
-    if (message.t === "history" && message.range && message.range !== LIVE_RANGE) {
-      this.keepRange(message);
-      return;
-    }
-    if (!this.isTracked(message.id)) return; // an answer for an instrument that is no longer tracked
-    if (message.t === "history") {
-      this.series.set(message.id, message.points.flat());
-      this.changedSeries.add(message.id);
-    } else if (message.request === "history") {
-      this.emit({ type: "chartUnavailable", id: message.id });
-    }
-  }
-
-  /** A longer chart for the open instrument arrived (one for another instrument, which is no longer open, is dropped). */
-  private keepRange(message: HistoryData): void {
-    if (message.id !== this.selectedId) return;
-    const key = rangeKey(message.id, message.range);
-    this.rangeSeries.set(key, flatten(message.points));
-    this.changedRanges.add(key);
-    if (message.session) {
-      this.sessions.set(message.id, message.session);
-    }
-  }
-
-  /** The open instrument's longer charts follow its price: their newest point shows the live price. */
-  private foldIntoRanges(updates: QuoteUpdate[]): void {
-    if (this.rangeSeries.size === 0 || this.selectedId === null) return;
-    const prefix = `${this.selectedId}:`;
-    for (const update of updates) {
-      if (update.id !== this.selectedId) continue;
-      for (const [key, data] of this.rangeSeries) {
-        if (!key.startsWith(prefix) || data.length < 2) continue;
-        data[data.length - 1] = update.last;
-        this.changedRanges.add(key);
-      }
-    }
-  }
-
-  /** Keep every tracked chart current: each update of its instrument is folded into the newest point or starts a new one. */
-  private foldIntoCharts(updates: QuoteUpdate[]): void {
-    if (this.series.size === 0) return; // no history yet: it will include these
-    for (const update of updates) {
-      const data = this.series.get(update.id);
-      if (!data || data.length === 0) continue;
-      appendTick(data, update.ts, update.last);
-      this.changedSeries.add(update.id);
-    }
+    const unavailable = this.tracker.handleReply(message);
+    if (unavailable !== null) this.emit({ type: "chartUnavailable", id: unavailable });
   }
 }

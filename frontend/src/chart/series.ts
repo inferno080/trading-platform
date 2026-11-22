@@ -34,7 +34,7 @@ export function appendTick(data: number[], time: number, price: number, capacity
   if (data.length > capacity * 2) data.splice(0, data.length - capacity * 2);
 }
 
-export interface SeriesSummary {
+interface SeriesSummary {
   count: number;
   last: number;
   high: number;

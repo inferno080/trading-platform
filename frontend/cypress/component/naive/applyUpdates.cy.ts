@@ -1,4 +1,4 @@
-import { applyUpdates } from "../../../src/naive/useNaiveFeed";
+import { applyUpdates } from "../../../src/naive/feedState";
 import { makeQuote, makeUpdate } from "../../support/fixtures";
 
 describe("applyUpdates", () => {
