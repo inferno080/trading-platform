@@ -374,3 +374,41 @@ describe("FeedStore: charts over a range", () => {
     expect(store.chart(2)).not.to.equal(undefined);
   });
 });
+
+describe("FeedStore: the market session of the open symbol's charts", () => {
+  const session = { market: "us", timeZone: "America/New_York", continuous: false, open: 1_000, close: 2_000 } as const;
+  const data = Float64Array.of(1000, 1, 2000, 2);
+
+  it("has no session until a longer chart arrives with one", () => {
+    const store = new FeedStore();
+    expect(store.session(1)).to.equal(undefined);
+    store.setCharts([{ id: 1, data }]); // the five-minute chart has none
+    expect(store.session(1)).to.equal(undefined);
+  });
+
+  it("keeps the session that arrives with a longer chart, for that instrument", () => {
+    const store = new FeedStore();
+    store.setCharts([{ id: 1, range: "1d", session, data }]);
+    expect(store.session(1)).to.deep.equal(session);
+    expect(store.session(2)).to.equal(undefined);
+  });
+
+  it("replaces the session when a newer one arrives", () => {
+    const store = new FeedStore();
+    store.setCharts([{ id: 1, range: "1d", session, data }]);
+    store.setCharts([{ id: 1, range: "1m", session: { ...session, close: 3_000 }, data }]);
+    expect(store.session(1)?.close).to.equal(3_000);
+  });
+
+  it("forgets the session of an instrument that is no longer tracked, and keeps the others", () => {
+    const store = new FeedStore();
+    store.setCharts([
+      { id: 1, range: "1d", session, data },
+      { id: 2, range: "1d", session, data },
+    ]);
+    store.keepCharts(new Set([2]));
+    expect(store.session(1)).to.equal(undefined);
+    expect(store.session(2)).to.deep.equal(session);
+  });
+});
+

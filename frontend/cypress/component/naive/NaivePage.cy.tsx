@@ -341,8 +341,9 @@ const goLiveWith = (count: number) => {
 };
 const deliverHistory = (id: number, last = 29920, count = 60) => cy.then(() => socket().receive(makeHistory(id, count, last)));
 /** The open chart's data: the page opens on one day, so that is the range its chart is drawn from. */
-const deliverOpenChart = (id: number, last = 29920, count = 60, range: HistoryRange = "1d") =>
-  cy.then(() => socket().receive({ ...makeHistory(id, count, last), range }));
+const newYork = { market: "us", timeZone: "America/New_York", continuous: false, open: Date.UTC(2026, 10, 18, 14, 30), close: Date.UTC(2026, 10, 18, 21, 0) } as const;
+const deliverOpenChart = (id: number, last = 29920, count = 60, range: HistoryRange = "1d", session?: typeof newYork) =>
+  cy.then(() => socket().receive({ ...makeHistory(id, count, last), range, ...(session ? { session } : {}) }));
 const chartLabel = () => cy.get("canvas.chart-canvas").invoke("attr", "aria-label");
 
 describe("NaivePage: the open chart", () => {
@@ -573,6 +574,46 @@ describe("NaivePage: chart ranges", () => {
   it("says the longer histories are simulated", () => {
     goLiveWith(3);
     cy.get(".range-note").should("have.text", "Simulated history");
+  });
+});
+
+describe("NaivePage: the market clock of the chart and the trades", () => {
+  it("times the trades on the market's clock, and names it in the heading, once the open symbol's session arrives", () => {
+    goLiveWith(3);
+    cy.then(() => {
+      socket().receive(makeDepth(0));
+      socket().receive(makeTrades(0));
+    });
+    cy.get("table.tape thead th").first().should("have.text", "Time"); // not known yet: the browser's clock
+    deliverOpenChart(0, 29920, 60, "1d", newYork);
+    cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+  });
+
+  it("keeps the plain heading when no session arrives", () => {
+    goLiveWith(3);
+    cy.then(() => {
+      socket().receive(makeDepth(0));
+      socket().receive(makeTrades(0));
+    });
+    deliverOpenChart(0, 29920, 60, "1d");
+    cy.get("table.tape thead th").first().should("have.text", "Time");
+  });
+
+  it("forgets the session when another symbol is opened, so its trades are not timed on the old market's clock", () => {
+    goLiveWith(3);
+    cy.then(() => {
+      socket().receive(makeDepth(0));
+      socket().receive(makeTrades(0));
+    });
+    deliverOpenChart(0, 29920, 60, "1d", newYork);
+    cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+    cy.contains("tbody tr", "AAB").find("button").click();
+    cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
+    cy.then(() => {
+      socket().receive(makeDepth(1));
+      socket().receive(makeTrades(1));
+    });
+    cy.get("table.tape thead th").first().should("have.text", "Time");
   });
 });
 

@@ -73,6 +73,20 @@ for (const tab of TABS) {
       cy.get("canvas.chart-canvas[data-ready=true]", { timeout: 15_000 }).should("exist");
     });
 
+    it("times the trades on the same market clock as the chart: the heading names the zone, and the newest trade is about the current time there", () => {
+      cy.get("table.tape tbody tr", { timeout: 30_000 }).should("have.length.greaterThan", 0);
+      cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(.+\)$/);
+      cy.get("table.tape tbody tr").first().find("td").first().invoke("text").then((shown) => {
+        const [clock, period] = shown.trim().split(/\s+/);
+        const [hours, minutes] = clock!.split(":").map(Number);
+        const minutesOfDay = ((hours! % 12) + (period === "PM" ? 12 : 0)) * 60 + minutes!;
+        const now = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", hour: "numeric", minute: "numeric" }).formatToParts(Date.now());
+        const nowMinutes = Number(now.find((part) => part.type === "hour")!.value) * 60 + Number(now.find((part) => part.type === "minute")!.value);
+        const apart = Math.abs(minutesOfDay - nowMinutes);
+        expect(Math.min(apart, 1440 - apart), "minutes between the newest trade and New York's clock").to.be.at.most(3);
+      });
+    });
+
     it("keeps the order book live while the range changes", () => {
       cy.get("table.book tbody tr", { timeout: 20_000 }).should("have.length", 10);
       cy.contains(".range-button", "1M").click();

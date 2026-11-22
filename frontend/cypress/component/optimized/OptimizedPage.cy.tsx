@@ -225,9 +225,15 @@ const sendChart = (id: number, last = 29920, count = 60) =>
   worker().then((w) => w.emit({ type: "batch", updates: [], stats: STATS, charts: [{ id, data: Float64Array.from(series(count, (i) => last - (count - 1 - i) * 5)) }] }));
 
 /** The open chart's data: the page opens on one day, so that is the range its chart is drawn from. */
-const sendOpenChart = (id: number, last = 29920, count = 60, range: HistoryRange = "1d") =>
+const newYork = { market: "us", timeZone: "America/New_York", continuous: false, open: Date.UTC(2026, 10, 18, 14, 30), close: Date.UTC(2026, 10, 18, 21, 0) } as const;
+const sendOpenChart = (id: number, last = 29920, count = 60, range: HistoryRange = "1d", session?: typeof newYork) =>
   worker().then((w) =>
-    w.emit({ type: "batch", updates: [], stats: STATS, charts: [{ id, range, data: Float64Array.from(series(count, (i) => last - (count - 1 - i) * 5)) }] }),
+    w.emit({
+      type: "batch",
+      updates: [],
+      stats: STATS,
+      charts: [{ id, range, ...(session ? { session } : {}), data: Float64Array.from(series(count, (i) => last - (count - 1 - i) * 5)) }],
+    }),
   );
 
 describe("OptimizedPage: the open chart", () => {
@@ -381,6 +387,30 @@ describe("OptimizedPage: chart ranges", () => {
     mountPage();
     deliverMarketWith(6);
     cy.get(".range-note").should("have.text", "Simulated history");
+  });
+});
+
+describe("OptimizedPage: the market clock of the chart and the trades", () => {
+  const book = {
+    depth: { id: 0, bids: [[29917, 2700] as [number, number]], asks: [[29921, 3500] as [number, number]] },
+    trades: { id: 0, trades: [{ ts: Date.UTC(2026, 10, 18, 15, 0, 0), price: 29920, size: 300, side: "buy" as const }] },
+  };
+
+  it("times the trades on the market's clock, and names it in the heading, once the open symbol's session has arrived", () => {
+    mountPage();
+    deliverMarketWith(6);
+    sendOpenChart(0, 29920, 60, "1d", newYork);
+    worker().then((w) => w.emit({ type: "batch", updates: [], stats: STATS, depth: book.depth, trades: book.trades }));
+    cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+    cy.get("table.tape tbody tr").first().find("td").first().invoke("text").should("match", /^(10|11):00:00 AM$/);
+  });
+
+  it("keeps the plain heading when the chart arrives with no session", () => {
+    mountPage();
+    deliverMarketWith(6);
+    sendOpenChart(0, 29920, 60, "1d");
+    worker().then((w) => w.emit({ type: "batch", updates: [], stats: STATS, depth: book.depth, trades: book.trades }));
+    cy.get("table.tape thead th").first().should("have.text", "Time");
   });
 });
 

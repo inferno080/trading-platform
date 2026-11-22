@@ -104,4 +104,32 @@ describe("OptimizedBook", () => {
     cy.then(() => store.setBook(depth(30000))); // nothing is listening, so this must not fail
     cy.contains("gone").should("exist");
   });
+
+  it("times the trades on the market's clock once the open symbol's session is known, naming the zone in the heading", () => {
+    const store = new FeedStore();
+    store.setCharts([
+      {
+        id: 1,
+        range: "1d",
+        session: { market: "us", timeZone: "America/New_York", continuous: false, open: Date.UTC(2026, 10, 18, 14, 30), close: Date.UTC(2026, 10, 18, 21, 0) },
+        data: Float64Array.of(1000, 29900, 2000, 29910),
+      },
+    ]);
+    mountBook(store);
+    cy.then(() => {
+      store.setBook(depth(29917));
+      store.addTrades({ id: 1, trades: [{ ...trade(0), ts: Date.UTC(2026, 10, 18, 15, 0, 0) }] });
+    });
+    cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+  });
+
+  it("keeps the plain heading until the session is known", () => {
+    const store = mountBook();
+    cy.then(() => {
+      store.setBook(depth(29917));
+      store.addTrades({ id: 1, trades: [trade(0)] });
+    });
+    cy.get("table.tape thead th").first().should("have.text", "Time");
+  });
 });
+

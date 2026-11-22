@@ -910,3 +910,58 @@ describe("FeedConnection: chart ranges", () => {
     });
   });
 });
+
+describe("FeedConnection: the market session of the open symbol", () => {
+  const session = { market: "us", timeZone: "America/New_York", continuous: false, open: Date.UTC(2026, 10, 18, 14, 30), close: Date.UTC(2026, 10, 18, 21, 0) } as const;
+  const reply = (id: number, range: string, withSession = true) => ({ ...makeHistory(id, 4, 29920, 1_000_000), range, ...(withSession ? { session } : {}) }) as ReturnType<typeof makeHistory>;
+  const charts = (batch: ReturnType<ReturnType<typeof setup>["lastBatch"]>) => batch.charts ?? [];
+
+  it("sends the session to the page with the longer chart it came with", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1d");
+    FakeWebSocket.latest.receive(reply(1, "1d"));
+    const chart = charts(lastBatch()).find((c) => c.range === "1d")!;
+    expect(chart.session).to.deep.equal(session);
+  });
+
+  it("does not send a session with the five-minute chart", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    FakeWebSocket.latest.receive(makeHistory(1, 3, 29920));
+    expect(charts(lastBatch())[0]!.session).to.equal(undefined);
+  });
+
+  it("keeps sending the session with the longer chart as the live price follows", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1d");
+    FakeWebSocket.latest.receive(reply(1, "1d"));
+    lastBatch();
+    FakeWebSocket.latest.receive(makeDelta(6, [makeUpdate(1, { last: 31000 })]));
+    const chart = charts(lastBatch()).find((c) => c.range === "1d")!;
+    expect(chart.session).to.deep.equal(session);
+    expect(chart.data.at(-1)).to.equal(31000);
+  });
+
+  it("does not carry the session of one symbol over to the next one opened", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1d");
+    FakeWebSocket.latest.receive(reply(1, "1d"));
+    lastBatch();
+    connection.select(2);
+    FakeWebSocket.latest.receive(reply(2, "1d", false)); // an answer with no session of its own
+    const chart = charts(lastBatch()).find((c) => c.id === 2 && c.range === "1d")!;
+    expect(chart.session).to.equal(undefined);
+  });
+
+  it("ignores the session of an answer for a symbol that is not open", () => {
+    const { connection, lastBatch } = live();
+    connection.select(1);
+    connection.setRange("1d");
+    FakeWebSocket.latest.receive(reply(2, "1d"));
+    expect(charts(lastBatch()).filter((c) => c.range)).to.have.length(0);
+  });
+});
+

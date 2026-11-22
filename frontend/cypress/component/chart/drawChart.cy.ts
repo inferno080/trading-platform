@@ -18,6 +18,20 @@ const view = (overrides: Partial<ChartView> = {}): ChartView => ({
 });
 const rising = series(60, (i) => 30000 + i * 10);
 
+/** The words a chart writes, in order, by listening to the canvas as it draws them. */
+const textsOf = (data: number[], overrides: Partial<ChartView> = {}) => {
+  const { context } = makeCanvas(400, 200);
+  const texts: string[] = [];
+  const fillText = context.fillText.bind(context);
+  context.fillText = (text: string, x: number, y: number) => {
+    texts.push(text);
+    fillText(text, x, y);
+  };
+  drawChart(context, data, view(overrides), TEST_COLORS);
+  return texts;
+};
+
+
 describe("nearestIndex", () => {
   const data = [0, 1, 1000, 2, 2000, 3, 3000, 4]; // four points one second apart
 
@@ -222,18 +236,6 @@ describe("readChartColors", () => {
 });
 
 describe("drawChart: ranges", () => {
-  // The words the chart writes, in order, by listening to the canvas as it draws them.
-  const textsOf = (data: number[], overrides: Partial<ChartView> = {}) => {
-    const { context } = makeCanvas(400, 200);
-    const texts: string[] = [];
-    const fillText = context.fillText.bind(context);
-    context.fillText = (text: string, x: number, y: number) => {
-      texts.push(text);
-      fillText(text, x, y);
-    };
-    drawChart(context, data, view(overrides), TEST_COLORS);
-    return texts;
-  };
   const DAY = 86_400_000;
   const oneYear = series(60, (i) => 30000 + i * 10).map((value, i) => (i % 2 === 0 ? Date.UTC(2026, 0, 1) + (i / 2) * 6 * DAY : value));
 
@@ -273,3 +275,42 @@ describe("drawChart: ranges", () => {
   });
 });
 
+describe("drawChart: a session's time axis", () => {
+  const open = Date.UTC(2026, 10, 18, 14, 30); // 9:30 AM in New York
+  const close = Date.UTC(2026, 10, 18, 21, 0); // 4:00 PM
+  // Three hours of data from the open, one point every 5 minutes: the day is still going, so the line stops partway.
+  const partway = series(37, (i) => 30000 + i * 5).map((value, i) => (i % 2 === 0 ? open + (i / 2) * 5 * 60_000 : value));
+
+  it("labels the axis from the open to the close on the market's clock, even though the data stops before the close", () => {
+    const texts = textsOf(partway, { range: "1d", timeZone: "America/New_York", domain: { start: open, end: close } });
+    const axis = texts.filter((text) => /^[A-Z][a-z]{2} \d{2}:\d{2} [AP]M$/.test(text));
+    expect(axis).to.have.length(4);
+    expect(axis[0]).to.equal("Wed 09:30 AM");
+    expect(axis[3]).to.equal("Wed 04:00 PM");
+  });
+
+  it("stops the line where the data stops, leaving the right of the chart empty, when the axis reaches further", () => {
+    const withDomain = makeCanvas(400, 200);
+    drawChart(withDomain.context, partway, view({ range: "1d", domain: { start: open, end: close } }), TEST_COLORS);
+    const right = withDomain.context.getImageData(300, 14, 80, 160).data; // the stretch of plot well past 3 hours into 6.5
+    let ink = 0;
+    for (let i = 3; i < right.length; i += 4) if (right[i]! > 200) ink++;
+    expect(countColor(withDomain.canvas, GREEN), "there is a line").to.be.greaterThan(50);
+    expect(ink, "but nothing drawn far to the right except the grid").to.be.lessThan(80 * 12); // only the grid's thin lines, no line chart
+  });
+
+  it("fills the whole width with the data when there is no domain, as before", () => {
+    const { canvas, context } = makeCanvas(400, 200);
+    drawChart(context, partway, view({ range: "1d" }), TEST_COLORS);
+    const right = context.getImageData(330, 14, 56, 160).data;
+    let green = 0;
+    for (let i = 0; i < right.length; i += 4) if (right[i + 1]! > 200 && right[i]! < 80) green++;
+    expect(countColor(canvas, GREEN)).to.be.greaterThan(50);
+    expect(green, "the line reaches the right edge").to.be.greaterThan(0);
+  });
+
+  it("writes the hover label on the market's clock, naming the zone", () => {
+    const texts = textsOf(partway, { range: "1d", timeZone: "America/New_York", domain: { start: open, end: close }, hoverX: 100 });
+    expect(texts.some((text) => /^Nov \d{1,2}, \d{2}:\d{2} [AP]M E[SD]T\s/.test(text))).to.equal(true);
+  });
+});

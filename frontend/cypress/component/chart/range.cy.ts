@@ -1,4 +1,5 @@
-import { CHART_RANGES, DEFAULT_RANGE, HISTORY_RANGES, LIVE_RANGE, baselineFor, baselineIsPrevClose, rangeKey } from "../../../src/chart/range";
+import { CHART_RANGES, DEFAULT_RANGE, HISTORY_RANGES, LIVE_RANGE, baselineFor, baselineIsPrevClose, rangeKey, sessionView } from "../../../src/chart/range";
+import type { SessionInfo } from "../../../src/protocol/messages";
 
 describe("chart ranges", () => {
   it("offers a day, a month, a year, the year so far and the maximum, shortest first, and no five-minute button", () => {
@@ -45,5 +46,33 @@ describe("baselineFor", () => {
     expect(baselineIsPrevClose("5m")).to.equal(true);
     expect(baselineIsPrevClose("1d")).to.equal(true);
     for (const range of ["1m", "1y", "ytd", "max"] as const) expect(baselineIsPrevClose(range), range).to.equal(false);
+  });
+});
+
+describe("sessionView", () => {
+  const newYork: SessionInfo = { market: "us", timeZone: "America/New_York", continuous: false, open: Date.UTC(2026, 10, 18, 14, 30), close: Date.UTC(2026, 10, 18, 21, 0) };
+  const fx: SessionInfo = { market: "fx", timeZone: "UTC", continuous: true, open: 1_000, close: 2_000 };
+  const midSession = Date.UTC(2026, 10, 18, 17, 0);
+
+  it("has nothing to say before the session is known, or for the live five-minute chart", () => {
+    expect(sessionView("1d", undefined, midSession)).to.deep.equal({});
+    expect(sessionView("5m", newYork, midSession)).to.deep.equal({});
+  });
+
+  it("writes a one-day chart on the market's clock, and has its axis reach from the open to the close while the day is still going", () => {
+    expect(sessionView("1d", newYork, midSession)).to.deep.equal({ timeZone: "America/New_York", domain: { start: newYork.open, end: newYork.close } });
+  });
+
+  it("lets the axis run on past the close once the data does (after hours, or at a weekend)", () => {
+    const evening = newYork.close + 3 * 3_600_000;
+    expect(sessionView("1d", newYork, evening).domain).to.deep.equal({ start: newYork.open, end: evening });
+  });
+
+  it("has no fixed axis for a market that trades round the clock, only its time zone", () => {
+    expect(sessionView("1d", fx, midSession)).to.deep.equal({ timeZone: "UTC" });
+  });
+
+  it("writes the longer ranges on the market's clock too, with no fixed axis", () => {
+    for (const range of ["1m", "1y", "ytd", "max"] as const) expect(sessionView(range, newYork, midSession), range).to.deep.equal({ timeZone: "America/New_York" });
   });
 });

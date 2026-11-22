@@ -5,6 +5,8 @@ import {
   percentFormatter,
   priceFormatter,
   rangeTimeFormatter,
+  timeFormatter,
+  timeZoneName,
 } from "../../../src/lib/format";
 
 describe("format helpers", () => {
@@ -113,6 +115,45 @@ describe("format helpers", () => {
     it("reuses a formatter instead of building one each time", () => {
       expect(rangeTimeFormatter("en-US", "1m", "axis")).to.equal(rangeTimeFormatter("en-US", "1m", "axis"));
       expect(rangeTimeFormatter("en-US", "1m", "axis")).not.to.equal(rangeTimeFormatter("en-US", "1m", "hover"));
+    });
+  });
+
+  describe("times on a market's own clock", () => {
+    const wednesday = Date.UTC(2026, 10, 18, 15, 0, 0); // 10:00:00 in New York (winter time), midnight-plus-noon... 00:00 next day in Tokyo
+
+    it("writes a time of day on the time zone given, not on the browser's", () => {
+      expect(timeFormatter("en-US", "America/New_York").format(wednesday)).to.equal("10:00:00 AM");
+      expect(timeFormatter("en-GB", "America/New_York").format(wednesday)).to.equal("10:00:00");
+      expect(timeFormatter("en-US", "Asia/Tokyo").format(wednesday)).to.equal("12:00:00 AM");
+      expect(timeFormatter("en-GB", "Europe/Berlin").format(wednesday)).to.equal("16:00:00");
+    });
+
+    it("keeps a formatter for a zone apart from the browser's and from other zones", () => {
+      expect(timeFormatter("en-US", "America/New_York")).to.equal(timeFormatter("en-US", "America/New_York"));
+      expect(timeFormatter("en-US", "America/New_York")).not.to.equal(timeFormatter("en-US", "Asia/Tokyo"));
+      expect(timeFormatter("en-US", "America/New_York")).not.to.equal(timeFormatter("en-US"));
+    });
+
+    it("still writes the browser's own clock when no zone is given", () => {
+      expect(timeFormatter("en-GB").format(wednesday)).to.match(/^\d{2}:\d{2}:\d{2}$/);
+    });
+
+    it("names a time zone the way the language writes it", () => {
+      expect(timeZoneName("en-US", "America/New_York")).to.match(/^E[SD]T$/);
+      expect(timeZoneName("en-US", "UTC")).to.equal("UTC");
+      expect(timeZoneName("en-US", "Asia/Tokyo").length).to.be.greaterThan(0);
+    });
+
+    it("writes a one-day axis and hover label on the market's clock, the hover naming the zone", () => {
+      expect(rangeTimeFormatter("en-US", "1d", "axis", "America/New_York").format(wednesday)).to.match(/^Wed 10:00 AM$/);
+      expect(rangeTimeFormatter("en-US", "1d", "axis", "Asia/Tokyo").format(wednesday)).to.match(/^Thu 12:00 AM$/);
+      expect(rangeTimeFormatter("en-US", "1d", "hover", "America/New_York").format(wednesday)).to.match(/E[SD]T$/);
+      expect(rangeTimeFormatter("en-US", "1d", "axis", "America/New_York").format(wednesday)).not.to.match(/E[SD]T/); // only the hover names it
+    });
+
+    it("keeps the same format for different zones apart", () => {
+      expect(rangeTimeFormatter("en-US", "1d", "axis", "America/New_York")).not.to.equal(rangeTimeFormatter("en-US", "1d", "axis", "Asia/Tokyo"));
+      expect(rangeTimeFormatter("en-US", "1d", "axis", "America/New_York")).to.equal(rangeTimeFormatter("en-US", "1d", "axis", "America/New_York"));
     });
   });
 });
