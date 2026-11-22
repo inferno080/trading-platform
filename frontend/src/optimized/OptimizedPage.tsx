@@ -11,6 +11,8 @@ import { WatchlistToggle } from "../watchlist/WatchlistToggle";
 import { Workspace } from "../watchlist/Workspace";
 import type { FeedStore } from "./feedStore";
 import { FIRST_INSTRUMENT } from "../chart/series";
+import { ChaosPanel } from "../chaos/ChaosPanel";
+import { ConnectionStatus } from "../components/ConnectionStatus";
 import { RfqModal } from "../rfq/RfqModal";
 import type { RfqPort } from "../rfq/bridge";
 import { OptimizedBook } from "./OptimizedBook";
@@ -152,8 +154,8 @@ export function OptimizedPage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { state, store, rfq } = useFeedWorker(selectedId, watchlist.ids);
-  const { status, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
+  const { state, store, rfq, retry, chaos } = useFeedWorker(selectedId, watchlist.ids);
+  const { status, reconnect, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
   const display: Display = { store, rfq, refreshMs: refreshSeconds * 1000, frozen };
 
@@ -162,9 +164,7 @@ export function OptimizedPage() {
     <section className="optimized-page" aria-label={t("optimized.region")} data-worker-scope={scope ?? undefined}>
       <div className="toolbar">
         {/* Status is text plus a dot, so it never relies on color alone. */}
-        <span className="status" data-status={status} role="status">
-          {t(`status.${status}`)}
-        </span>
+        <ConnectionStatus status={status} reconnect={reconnect} onRetry={retry} />
         <RefreshControl seconds={refreshSeconds} onChange={setRefreshSeconds} />
         <button type="button" className="toggle-button" aria-pressed={frozen} onClick={() => setFrozen((f) => !f)}>
           {t("optimized.freeze")}
@@ -180,6 +180,7 @@ export function OptimizedPage() {
       {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
 
       <Hud session={session} mode="optimized" refreshSeconds={refreshSeconds} />
+      <ChaosPanel connected={status === "live"} onSend={chaos} />
 
       {/* The open chart (70%) beside the watchlist (30%) from the first moment, and the quotes below, across the full width. */}
       <Workspace open={watchlist.open} panel={<Watchlist display={display} ids={watchlist.ids} onOpen={choose} onRemove={watchlist.remove} />}>

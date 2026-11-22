@@ -190,6 +190,17 @@ export interface RfqReject {
   ref: number;
 }
 
+/** The faults a client can ask the server to inject (the server has the same list). */
+export const CHAOS_ACTIONS = ["pause", "resume", "gap", "drop", "burst", "latency", "reset"] as const;
+export type ChaosAction = (typeof CHAOS_ACTIONS)[number];
+
+/** Asks the server to misbehave on purpose. `value` is seconds for `burst` and milliseconds for `latency`. */
+export interface ChaosRequest {
+  t: "chaos";
+  action: ChaosAction;
+  value?: number;
+}
+
 export type ClientMessage =
   | ResyncRequest
   | ReferenceRequest
@@ -198,4 +209,5 @@ export type ClientMessage =
   | HistoryRequest
   | RfqRequest
   | RfqAccept
-  | RfqReject;
+  | RfqReject
+  | ChaosRequest;

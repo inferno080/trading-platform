@@ -1,16 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkerFactory } from "../feed/FeedWorkerContext";
 import type { FeedStatus, WorkerEvent } from "../feed/messages";
 import type { WorkerLike } from "../feed/FeedWorkerContext";
 import { WS_URL } from "../feed/url";
+import type { ReconnectInfo } from "../feed/reconnect";
 import { collector } from "../hud/collector";
-import type { Session } from "../protocol/messages";
+import type { ChaosAction, Session } from "../protocol/messages";
 import { RfqBridge, type RfqPort } from "../rfq/bridge";
 import { FeedStore } from "./feedStore";
 
 /** What the page shows about the connection. The prices themselves live in the store, not here. */
 export interface FeedWorkerState {
   status: FeedStatus;
+  /** While the connection is down: which attempt is next and when it will be made. */
+  reconnect: ReconnectInfo | null;
   session: Session | null;
   /** The name of the worker's global scope, once it has started; shows that the connection is not on the page's thread. */
   scope: string | null;
@@ -28,6 +31,7 @@ export interface FeedWorkerState {
 
 export const initialFeedState: FeedWorkerState = {
   status: "connecting",
+  reconnect: null,
   session: null,
   scope: null,
   referenceCount: null,
@@ -51,7 +55,9 @@ export function reduceWorkerEvent(state: FeedWorkerState, event: WorkerEvent): F
     case "ready":
       return { ...state, scope: event.scope };
     case "status":
-      return { ...state, status: event.status };
+      return { ...state, status: event.status, reconnect: event.status === "reconnecting" ? state.reconnect : null };
+    case "reconnect":
+      return { ...state, reconnect: { attempt: event.attempt, retryAt: event.retryAt } };
     case "session":
       return { ...state, session: event.session };
     case "badVersion":
@@ -95,7 +101,7 @@ export const RESUME_GRACE_MS = 1_000;
 export function useFeedWorker(
   selectedId: number | null = null,
   watchlist: number[] = NO_IDS,
-): { state: FeedWorkerState; store: FeedStore; rfq: RfqPort } {
+): { state: FeedWorkerState; store: FeedStore; rfq: RfqPort; retry: () => void; chaos: (action: ChaosAction, value?: number) => void } {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
   const [store] = useState(() => new FeedStore());
@@ -188,5 +194,8 @@ export function useFeedWorker(
   }, [store, selectedId, watchlist]);
 
   const rfq = useMemo(() => bridge.port, [bridge]);
-  return { state, store, rfq };
+  // Try to reconnect now, and ask the server to misbehave: both are commands for the worker, which owns the connection.
+  const retry = useCallback(() => worker.current?.postMessage({ type: "retry" }), []);
+  const chaos = useCallback((action: ChaosAction, value?: number) => worker.current?.postMessage({ type: "chaos", action, value }), []);
+  return { state, store, rfq, retry, chaos };
 }

@@ -29,6 +29,8 @@ scope.onmessage = (event) => {
   else if (command.type === "watch") connection.watch(command.ids);
   else if (command.type === "rfq") connection.requestQuote(command.request);
   else if (command.type === "rfqAccept" || command.type === "rfqReject") connection.answerQuote(command.type, command.ref);
+  else if (command.type === "retry") connection.retryNow();
+  else if (command.type === "chaos") connection.sendChaos(command.action, command.value);
   else connection.pull();
 };
 

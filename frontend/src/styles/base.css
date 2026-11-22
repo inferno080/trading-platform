@@ -937,3 +937,83 @@ tbody tr {
   align-items: center;
   justify-content: center;
 }
+
+/* Connection state while reconnecting, and the chaos controls (see components/ConnectionStatus.tsx, chaos/ChaosPanel.tsx) */
+.reconnect-countdown {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.chaos {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.chaos summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.chaos-note {
+  margin: var(--space-2) 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+.chaos-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.chaos-row {
+  display: grid;
+  grid-template-columns: 12rem auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+}
+.chaos-row > button:first-child {
+  justify-self: start;
+}
+.chaos-row > .chaos-help {
+  grid-column: 3;
+}
+.chaos-row > button:first-child:only-of-type + .chaos-help {
+  grid-column: 2 / -1;
+}
+.chaos-help {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+.chaos-number {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+}
+.chaos-number input {
+  width: 5rem;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.chaos-sent {
+  min-height: 1.25rem;
+  margin: var(--space-2) 0 0;
+  font-size: 0.8125rem;
+}
+@media (max-width: 40rem) {
+  .chaos-row {
+    grid-template-columns: 1fr;
+  }
+  .chaos-row > .chaos-help,
+  .chaos-row > button:first-child:only-of-type + .chaos-help {
+    grid-column: auto;
+  }
+}
