@@ -33,7 +33,7 @@ const visitWith = (settings: { theme?: "light" | "dark"; locale?: string }, url 
 
 describe("accessibility (automated WCAG 2.2 AA scan)", () => {
   for (const theme of ["light", "dark"] as const) {
-    for (const locale of ["en-US", "ja-JP"]) {
+    for (const locale of ["en-US", "en-GB", "ja-JP"]) {
       it(`has no violations: ${theme} theme, ${locale}`, () => {
         visitWith({ theme, locale });
         waitForLiveTable();
@@ -83,7 +83,7 @@ describe("accessibility of the Optimized tab (the default view)", () => {
   beforeEach(() => emulateMedia([{ name: "prefers-reduced-motion", value: "reduce" }]));
 
   for (const theme of ["light", "dark"] as const) {
-    for (const locale of ["en-US", "ja-JP"]) {
+    for (const locale of ["en-US", "en-GB", "ja-JP"]) {
       it(`has no violations: ${theme} theme, ${locale}`, () => {
         visitWith({ theme, locale }, "/");
         waitForLiveGrid();
@@ -91,13 +91,6 @@ describe("accessibility of the Optimized tab (the default view)", () => {
       });
     }
   }
-
-  it("has no violations while the grid is frozen", () => {
-    cy.visit("/");
-    waitForLiveGrid();
-    cy.contains("button", "Freeze stream").click();
-    scan();
-  });
 
   it("reflows to a 320 pixel wide screen without sideways scrolling of the page (WCAG 1.4.10)", () => {
     cy.viewport(320, 640);
@@ -120,7 +113,7 @@ describe("accessibility of the chart and the watchlist", () => {
 
   for (const tab of TABS) {
     for (const theme of ["light", "dark"] as const) {
-      for (const locale of ["en-US", "ja-JP"]) {
+      for (const locale of ["en-US", "en-GB", "ja-JP"]) {
         it(`${tab.name}: no violations with the chart open and symbols on the watchlist: ${theme} theme, ${locale}`, () => {
           visitWith({ theme, locale }, tab.url);
           tab.ready();
@@ -237,4 +230,32 @@ describe("accessibility details a scanner cannot fully judge", () => {
     waitForLiveTable();
     cy.get(".status").invoke("text").should("not.be.empty");
   });
+});
+
+// The request-for-quote dialog and the chaos controls, on both tabs, in each language and theme. Reduced motion, as above.
+describe("accessibility of the quote dialog and the chaos controls", () => {
+  const TABS = [
+    { name: "Naive", url: NAIVE, ready: waitForLiveTable },
+    { name: "Optimized", url: "/", ready: waitForLiveGrid },
+  ];
+  beforeEach(() => emulateMedia([{ name: "prefers-reduced-motion", value: "reduce" }]));
+
+  for (const tab of TABS) {
+    for (const theme of ["light", "dark"] as const) {
+      for (const locale of ["en-US", "en-GB", "ja-JP"]) {
+        it(`${tab.name}: no violations with the chaos controls open, and with a quote on screen: ${theme} theme, ${locale}`, () => {
+          visitWith({ theme, locale }, tab.url);
+          tab.ready();
+          waitForChartDrawn();
+          cy.get("summary").click();
+          cy.get("details.chaos[open]").should("exist");
+          scan();
+          cy.get(".rfq-open").click();
+          cy.get("dialog[open] #rfq-quantity").type("100{enter}");
+          cy.get(".rfq-countdown", { timeout: 15_000 }).should("exist");
+          scan();
+        });
+      }
+    }
+  }
 });

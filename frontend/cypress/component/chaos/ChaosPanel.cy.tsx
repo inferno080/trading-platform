@@ -90,6 +90,19 @@ describe("ChaosPanel", () => {
     cy.get(".chaos-note").last().should("contain.text", "while the connection is live");
   });
 
+  it("says what was sent in Japanese with the unit written the Japanese way", () => {
+    localStorage.setItem("locale", "ja-JP");
+    const onSend = cy.stub();
+    cy.mount(withI18n(<ChaosPanel connected onSend={onSend} />));
+    cy.contains("summary", "障害テスト").click();
+    cy.contains("button", "遅延を加える").click();
+    cy.get(".chaos-sent").should("have.text", "送信しました：遅延を加える（500ミリ秒）");
+    cy.contains("button", "バーストを送る").click();
+    cy.get(".chaos-sent").should("have.text", "送信しました：バーストを送る（5秒）");
+    cy.contains("button", "接続を切断").click();
+    cy.get(".chaos-sent").should("have.text", "送信しました：接続を切断");
+  });
+
   it("is in Japanese when the language is", () => {
     localStorage.setItem("locale", "ja-JP");
     cy.mount(withI18n(<ChaosPanel connected onSend={cy.stub()} />));

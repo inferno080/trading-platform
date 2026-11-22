@@ -1,12 +1,34 @@
 import { useState } from "react";
 import { collector } from "../../../src/hud/collector";
-import { Hud } from "../../../src/hud/Hud";
+import { Hud, RecordButton } from "../../../src/hud/Hud";
+import type { PipelineMode } from "../../../src/hud/recorder";
+import { useHud } from "../../../src/hud/useHud";
+import type { Session } from "../../../src/protocol/messages";
 import { makeSession } from "../../support/fixtures";
 import { withI18n } from "../../support/render";
 
+interface HarnessProps {
+  session: Session | null;
+  mode: PipelineMode;
+  refreshSeconds?: number | null;
+}
+
+/** What a page does: the hook once, the record button in its toolbar, and the panel below. */
+function HudHarness({ session, mode, refreshSeconds = null }: HarnessProps) {
+  const hud = useHud(session, mode, refreshSeconds);
+  return (
+    <>
+      <div className="toolbar">
+        <RecordButton hud={hud} />
+      </div>
+      <Hud hud={hud} refreshSeconds={refreshSeconds} />
+    </>
+  );
+}
+
 /** Mount the HUD and wait until it is on screen, which is after React has registered its timers. */
-const mountHud = (props: Partial<Parameters<typeof Hud>[0]> = {}) => {
-  cy.mount(withI18n(<Hud session={makeSession()} mode="naive" {...props} />));
+const mountHud = (props: Partial<HarnessProps> = {}) => {
+  cy.mount(withI18n(<HudHarness session={makeSession()} mode="naive" {...props} />));
   cy.get(".hud").should("exist");
 };
 
@@ -180,7 +202,7 @@ describe("Hud", () => {
         return (
           <>
             <button onClick={() => setSeconds(0)}>set to 0</button>
-            <Hud session={makeSession()} mode="optimized" refreshSeconds={seconds} />
+            <HudHarness session={makeSession()} mode="optimized" refreshSeconds={seconds} />
           </>
         );
       }
@@ -211,5 +233,67 @@ describe("Hud", () => {
     mountHud();
     cy.get("#hud-title").should("have.text", "パフォーマンス");
     cy.get(".record-button").should("have.text", "30秒間を記録");
+  });
+
+  describe("collapsing", () => {
+    it("is open at first, and collapses to its heading when the heading is pressed", () => {
+      mountHud();
+      cy.get(".hud details").should("have.attr", "open");
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(true));
+      cy.contains("summary", "Performance").click();
+      cy.get(".hud details").should("not.have.attr", "open");
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(false));
+      cy.contains("summary", "Performance").click();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(true));
+    });
+
+    it("is a disclosure that the keyboard can open and close, and the heading stays a heading", () => {
+      mountHud();
+      cy.get("summary h2#hud-title").should("have.text", "Performance");
+      cy.get(".record-button").focus().realPress("Tab"); // the next stop after the button is the panel's heading
+      cy.focused().should("match", "summary");
+      cy.realPress("Enter");
+      cy.get(".hud details").should("not.have.attr", "open");
+      cy.realPress("Space");
+      cy.get(".hud details").should("have.attr", "open");
+    });
+
+    it("collapses its warnings with it, and shows them again when it is opened", () => {
+      mountHud({ mode: "optimized", refreshSeconds: 1.5 });
+      cy.get(".hud-warning").then(($notes) => expect($notes[$notes.length - 1]!.checkVisibility()).to.equal(true));
+      cy.contains("summary", "Performance").click();
+      cy.get(".hud-warning").each(($note) => expect($note[0]!.checkVisibility()).to.equal(false));
+      cy.contains("summary", "Performance").click();
+      cy.contains(".hud-warning", "refreshes every 1.5 s").then(($note) => expect($note[0]!.checkVisibility()).to.equal(true));
+    });
+
+    it("keeps the note about a saved run in view while collapsed, because it is announced to screen readers", () => {
+      cy.clock();
+      captureDownload();
+      mountHud();
+      cy.contains("summary", "Performance").click();
+      cy.get(".record-button").click();
+      tickSeconds(33);
+      cy.get(".hud-note[role=status]").then(($note) => expect($note[0]!.checkVisibility()).to.equal(true));
+    });
+
+    it("keeps sampling, and a recording keeps running and saves its file, while collapsed", () => {
+      cy.clock();
+      const saved = captureDownload();
+      mountHud();
+      cy.contains("summary", "Performance").click();
+      cy.get(".record-button").click();
+      tickSeconds(33);
+      cy.then(() => expect(saved.names).to.have.length(1));
+      cy.get(".hud-note[role=status]").should("contain.text", "Saved");
+    });
+  });
+
+  describe("the record button", () => {
+    it("is not inside the panel, so it can sit in the page's toolbar", () => {
+      mountHud();
+      cy.get(".hud .record-button").should("not.exist");
+      cy.get(".toolbar .record-button").should("exist");
+    });
   });
 });

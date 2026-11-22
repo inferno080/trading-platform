@@ -12,9 +12,9 @@ const depth = (bid: number): DepthUpdate => ({
 });
 const trade = (n: number, side: Trade["side"] = "buy"): Trade => ({ ts: 1_700_000_000_000 + n * 1000, price: 29900 + n, size: 100 * (n + 1), side });
 
-const bookElement = (store: FeedStore, options: { refreshMs?: number; frozen?: boolean } = {}) =>
-  withI18n(<OptimizedBook store={store} decimals={2} refreshMs={options.refreshMs ?? 0} frozen={options.frozen ?? false} />);
-const mountBook = (store = new FeedStore(), options: { refreshMs?: number; frozen?: boolean } = {}) => {
+const bookElement = (store: FeedStore, options: { refreshMs?: number } = {}) =>
+  withI18n(<OptimizedBook store={store} decimals={2} refreshMs={options.refreshMs ?? 0} />);
+const mountBook = (store = new FeedStore(), options: { refreshMs?: number } = {}) => {
   cy.mount(bookElement(store, options));
   return store;
 };
@@ -94,29 +94,6 @@ describe("OptimizedBook", () => {
         for (let i = 1; i <= 20; i++) store.setBook(depth(29917 + i));
       });
       bestBid().should("have.text", "299.37");
-    });
-  });
-
-  describe("when frozen", () => {
-    it("holds still while the store keeps receiving", () => {
-      const store = mountBook(new FeedStore(), { frozen: true });
-      afterFrames(5); // let it take what is already there (nothing) before the change
-      cy.then(() => store.setBook(depth(29917)));
-      afterFrames(15);
-      cy.get("table.book").should("not.exist");
-    });
-
-    it("keeps showing what it showed, and catches up at once when unfrozen", () => {
-      const store = mountBook();
-      cy.then(() => store.setBook(depth(29917)));
-      bestBid().should("have.text", "299.17");
-      cy.mount(bookElement(store, { frozen: true }));
-      afterFrames(5);
-      cy.then(() => store.setBook(depth(30000)));
-      afterFrames(15);
-      bestBid().should("have.text", "299.17");
-      cy.mount(bookElement(store, { frozen: false }));
-      bestBid().should("have.text", "300.00");
     });
   });
 

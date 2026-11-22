@@ -1,7 +1,6 @@
 import { OptimizedPage } from "../../../src/optimized/OptimizedPage";
 import { FakeWorker } from "../../support/fakeWorker";
 import { series } from "../../support/canvas";
-import { afterFrames } from "../../support/frames";
 import { makeQuote, makeReference, makeReferenceData, makeSession, makeSnapshot } from "../../support/fixtures";
 import { withFakeWorker, withI18n } from "../../support/render";
 
@@ -102,12 +101,45 @@ describe("OptimizedPage", () => {
     });
   });
 
+  describe("the toolbar", () => {
+    it("has no Freeze button (pausing the feed is what the chaos controls are for)", () => {
+      mountPage();
+      cy.contains("button", "Freeze stream").should("not.exist");
+    });
+
+    it("puts the record button beside the watchlist toggle, both at the right-hand end", () => {
+      mountPage();
+      cy.get(".toolbar-end").children().should("have.length", 2);
+      cy.get(".toolbar-end > :first-child").should("have.class", "record-button");
+      cy.get(".toolbar-end > :last-child").should("have.class", "watchlist-toggle");
+      cy.get(".hud .record-button").should("not.exist");
+    });
+
+    it("has a performance panel that can be collapsed to its heading", () => {
+      mountPage();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(true));
+      cy.contains("summary", "Performance").click();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(false));
+    });
+
+    it("puts the watchlist toggle at the right-hand end", () => {
+      mountPage();
+      cy.get(".toolbar").then(($toolbar) => {
+        cy.get(".toolbar .watchlist-toggle").then(($toggle) => {
+          const bar = $toolbar[0]!.getBoundingClientRect();
+          const toggle = $toggle[0]!.getBoundingClientRect();
+          expect(bar.right - toggle.right).to.be.lessThan(2);
+        });
+      });
+    });
+  });
+
   describe("the refresh interval", () => {
-    it("is a labelled number box that starts at 1.5 seconds, with a hint", () => {
+    it("is a labelled number box that starts at 1.5 seconds, with no explanation line beside it", () => {
       mountPage();
       cy.contains("label", "Refresh every (seconds)").should("have.attr", "for", "refresh-seconds");
-      refreshBox().should("have.value", "1.5").and("have.attr", "type", "number").and("have.attr", "aria-describedby", "refresh-hint");
-      cy.get("#refresh-hint").should("contain.text", "0 draws every frame");
+      refreshBox().should("have.value", "1.5").and("have.attr", "type", "number").and("not.have.attr", "aria-describedby");
+      cy.get(".refresh-hint").should("not.exist");
     });
 
     it("warns in the performance panel that the default interval flatters a benchmark, until it is set to 0", () => {
@@ -160,28 +192,6 @@ describe("OptimizedPage", () => {
       refreshBox().clear();
       sendBatch(31000);
       last(0).should("contain.text", "310.00"); // still 0
-    });
-  });
-
-  describe("the freeze button", () => {
-    it("starts unpressed, and shows no frozen note", () => {
-      mountPage();
-      cy.contains("button", "Freeze stream").should("have.attr", "aria-pressed", "false");
-      cy.contains("Stream frozen").should("not.exist");
-    });
-
-    it("holds the grid still while pressed, says so, and shows the latest when pressed again", () => {
-      mountPage();
-      deliverMarket();
-      refreshBox().clear().type("0");
-      last(0).should("have.text", "299.20");
-      cy.contains("button", "Freeze stream").click().should("have.attr", "aria-pressed", "true");
-      cy.get(".frozen-note").should("contain.text", "Stream frozen");
-      sendBatch(31000);
-      last(0).should("have.text", "299.20");
-      cy.contains("button", "Freeze stream").click().should("have.attr", "aria-pressed", "false");
-      cy.get(".frozen-note").should("have.text", "");
-      last(0).should("contain.text", "310.00");
     });
   });
 
@@ -281,19 +291,6 @@ describe("OptimizedPage: the open chart", () => {
     cy.get("section.symbol-detail").should("not.exist");
   });
 
-  it("holds the chart still when the stream is frozen, and catches up when it is resumed", () => {
-    mountPage();
-    deliverMarketWith(6);
-    refreshBox().clear().type("0");
-    sendChart(0, 29920);
-    cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("contain", "last 299.20");
-    cy.contains("button", "Freeze stream").click();
-    sendChart(0, 31000);
-    afterFrames(10);
-    cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("contain", "last 299.20");
-    cy.contains("button", "Freeze stream").click();
-    cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("contain", "last 310.00");
-  });
 });
 
 describe("OptimizedPage: the watchlist", () => {
@@ -412,21 +409,6 @@ describe("OptimizedPage: the watchlist", () => {
       deliverMarketWith(6);
       cy.get(".workspace").should("have.attr", "data-watchlist", "closed");
     });
-  });
-
-  it("follows the refresh interval and Freeze, like the grid and the big chart", () => {
-    localStorage.setItem("watchlist", "[1]");
-    mountPage();
-    deliverMarketWith(6);
-    refreshBox().clear().type("0");
-    sendChart(1, 29920);
-    panelItems().first().find(".price-now").should("contain.text", "299.20");
-    cy.contains("button", "Freeze stream").click();
-    sendChart(1, 31000);
-    afterFrames(10);
-    panelItems().first().find(".price-now").should("contain.text", "299.20");
-    cy.contains("button", "Freeze stream").click();
-    panelItems().first().find(".price-now").should("contain.text", "310.00");
   });
 
   it("can be used with the keyboard alone", () => {

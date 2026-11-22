@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { SymbolDetail } from "../chart/SymbolDetail";
 import { MiniChartLoading, SymbolDetailSkeleton, TableSkeleton } from "../components/skeletons";
-import { Hud } from "../hud/Hud";
+import { Hud, RecordButton } from "../hud/Hud";
+import { useHud } from "../hud/useHud";
 import { useT } from "../i18n/useT";
 import { PROTOCOL_VERSION } from "../protocol/messages";
 import { Toast } from "../watchlist/Toast";
@@ -45,13 +46,9 @@ function RefreshControl({ seconds, onChange }: { seconds: number; onChange: (sec
         max={MAX_REFRESH_SECONDS}
         step={0.5}
         value={text}
-        aria-describedby="refresh-hint"
         onChange={(event) => type(event.target.value)}
         onBlur={() => setText(String(seconds))} // leaving the box with something invalid puts the real value back
       />
-      <span id="refresh-hint" className="refresh-hint">
-        {t("optimized.refresh.hint", { max: MAX_REFRESH_SECONDS })}
-      </span>
     </div>
   );
 }
@@ -60,7 +57,6 @@ interface Display {
   store: FeedStore;
   rfq: RfqPort;
   refreshMs: number;
-  frozen: boolean;
 }
 
 /** The panel with the price chart of one instrument, once the page knows its symbol and reference data. */
@@ -81,7 +77,7 @@ function SelectedChart({
   onClose: () => void;
   takeFocus: boolean;
 }) {
-  const { store, refreshMs, frozen } = display;
+  const { store, refreshMs } = display;
   const row = store.row(id);
   const instrument = store.instrument(id);
   if (!row || !instrument) return null;
@@ -96,10 +92,10 @@ function SelectedChart({
       onToggleWatchlist={onToggleWatchlist}
       onClose={onClose}
       takeFocus={takeFocus}
-      side={<OptimizedBook store={store} decimals={instrument.decimals} refreshMs={refreshMs} frozen={frozen} />}
+      side={<OptimizedBook store={store} decimals={instrument.decimals} refreshMs={refreshMs} />}
       ticket={<RfqModal key={id} port={display.rfq} instrumentId={id} symbol={row.sym} decimals={instrument.decimals} />}
       price={
-        <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" refreshMs={refreshMs} frozen={frozen} />
+        <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" refreshMs={refreshMs} />
       }
     >
       <OptimizedChart
@@ -111,7 +107,7 @@ function SelectedChart({
         prevClose={instrument.prevClose}
         unavailable={unavailable}
         refreshMs={refreshMs}
-        frozen={frozen}
+       
       />
     </SymbolDetail>
   );
@@ -119,7 +115,7 @@ function SelectedChart({
 
 /** The watchlist panel: a mini chart for each symbol on it, drawn from the store. */
 function Watchlist({ display, ids, onOpen, onRemove }: { display: Display; ids: number[]; onOpen: (id: number) => void; onRemove: (id: number) => void }) {
-  const { store, refreshMs, frozen } = display;
+  const { store, refreshMs } = display;
   const items: WatchlistItem[] = ids.map((id) => {
     const row = store.row(id);
     const instrument = store.instrument(id);
@@ -129,7 +125,7 @@ function Watchlist({ display, ids, onOpen, onRemove }: { display: Display; ids: 
       name: instrument?.name ?? "",
       chart:
         row && instrument ? (
-          <OptimizedMiniChart store={store} id={id} symbol={row.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} refreshMs={refreshMs} frozen={frozen} />
+          <OptimizedMiniChart store={store} id={id} symbol={row.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} refreshMs={refreshMs} />
         ) : (
           <MiniChartLoading />
         ),
@@ -144,7 +140,6 @@ function Watchlist({ display, ids, onOpen, onRemove }: { display: Display; ids: 
  */
 export function OptimizedPage() {
   const t = useT();
-  const [frozen, setFrozen] = useState(false);
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_REFRESH_SECONDS);
   // The chart of the first instrument (AAA, the most active) is open from the start; `userChose` is false until the person picks one.
   const [selectedId, setSelectedId] = useState<number | null>(FIRST_INSTRUMENT);
@@ -157,7 +152,8 @@ export function OptimizedPage() {
   const { state, store, rfq, retry, chaos } = useFeedWorker(selectedId, watchlist.ids);
   const { status, reconnect, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
-  const display: Display = { store, rfq, refreshMs: refreshSeconds * 1000, frozen };
+  const hud = useHud(session, "optimized", refreshSeconds);
+  const display: Display = { store, rfq, refreshMs: refreshSeconds * 1000 };
 
   return (
     // The scope name proves, to the tests, that the connection runs in a worker and not in the page.
@@ -166,20 +162,17 @@ export function OptimizedPage() {
         {/* Status is text plus a dot, so it never relies on color alone. */}
         <ConnectionStatus status={status} reconnect={reconnect} onRetry={retry} />
         <RefreshControl seconds={refreshSeconds} onChange={setRefreshSeconds} />
-        <button type="button" className="toggle-button" aria-pressed={frozen} onClick={() => setFrozen((f) => !f)}>
-          {t("optimized.freeze")}
-        </button>
-        <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
-        <span className="frozen-note" role="status">
-          {frozen && t("optimized.frozen")}
-        </span>
+        <div className="toolbar-end">
+          <RecordButton hud={hud} />
+          <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
+        </div>
       </div>
       {badVersion !== null && (
         <p role="alert">{t("error.protocol", { version: badVersion, expected: PROTOCOL_VERSION })}</p>
       )}
       {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
 
-      <Hud session={session} mode="optimized" refreshSeconds={refreshSeconds} />
+      <Hud hud={hud} refreshSeconds={refreshSeconds} />
       <ChaosPanel connected={status === "live"} onSend={chaos} />
 
       {/* The open chart (70%) beside the watchlist (30%) from the first moment, and the quotes below, across the full width. */}
@@ -200,7 +193,7 @@ export function OptimizedPage() {
           ))}
       </Workspace>
       {ready ? (
-        <QuotesGrid store={store} frozen={frozen} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={choose} />
+        <QuotesGrid store={store} refreshMs={refreshSeconds * 1000} selectedId={selectedId} onSelect={choose} />
       ) : (
         <div role="status">
           <span className="visually-hidden">{t("table.waiting")}</span>

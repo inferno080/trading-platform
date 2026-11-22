@@ -8,6 +8,16 @@ const japanese = jaJP as Record<string, string>;
 const british = enGB as Record<string, string>;
 
 // The names of the {placeholders} in a message, so translations can be checked against the English.
+// A message without its {placeholders}, which may hold nested braces ({count, plural, one {...}}): the innermost go first.
+const withoutPlaceholders = (text: string): string => {
+  let rest = text;
+  for (let before = ""; before !== rest; ) {
+    before = rest;
+    rest = rest.replace(/\{[^{}]*\}/g, "");
+  }
+  return rest;
+};
+
 const placeholders = (text: string): string[] =>
   [...text.matchAll(/\{(\w+)/g)].map((match) => match[1] as string).sort();
 
@@ -31,6 +41,17 @@ describe("locales", () => {
     }
   });
 
+  it("has no Japanese message left in English: each has Japanese text, unless it is only placeholders, numbers and punctuation", () => {
+    for (const [id, text] of Object.entries(japanese)) {
+      const rest = withoutPlaceholders(text);
+      if (/[A-Za-z0-9\u3040-\u30ff\u4e00-\u9fff]/.test(rest)) expect(rest, id).to.match(/[\u3040-\u30ff\u4e00-\u9fff]/);
+    }
+  });
+
+  it("writes Japanese messages with full-width punctuation, not an English comma, colon or brackets after a Japanese word", () => {
+    for (const [id, text] of Object.entries(japanese)) expect(text, id).not.to.match(/[\u3040-\u30ff\u4e00-\u9fff][,:(]/);
+  });
+
   it("only overrides messages that exist in US English for UK English", () => {
     for (const id of Object.keys(british)) expect(english, id).to.have.property(id);
   });
@@ -44,6 +65,10 @@ describe("locales", () => {
     expect(MESSAGES["en-GB"]["tab.optimized"]).to.equal("Optimised");
     expect(MESSAGES["en-GB"]["optimized.region"]).to.equal("Optimised version");
     expect(MESSAGES["en-US"]["tab.optimized"]).to.equal("Optimized");
+  });
+
+  it("has no other common American spellings left in UK English", () => {
+    for (const [id, text] of Object.entries(MESSAGES["en-GB"])) expect(text, id).not.to.match(/\b(colors?|behaviors?|centers?|gray|canceled|favorites?|license)\b/i);
   });
 
   it("has no American -ize spellings left in UK English", () => {

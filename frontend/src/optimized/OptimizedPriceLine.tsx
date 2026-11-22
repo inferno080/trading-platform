@@ -10,16 +10,15 @@ interface OptimizedPriceLineProps {
   decimals: number;
   prevClose: number;
   variant: "big" | "small";
-  /** The same refresh interval and Freeze as everything else on screen. */
+  /** The same refresh interval as everything else on screen. */
   refreshMs: number;
-  frozen: boolean;
 }
 
 /**
  * The price and its move, read from the store. Only this tiny component re-renders, at most once per refresh interval
- * (every change at 0), and it holds still while frozen and catches up when unfrozen.
+ * (every change at 0).
  */
-export function OptimizedPriceLine({ store, id, decimals, prevClose, variant, refreshMs, frozen }: OptimizedPriceLineProps) {
+export function OptimizedPriceLine({ store, id, decimals, prevClose, variant, refreshMs }: OptimizedPriceLineProps) {
   const { locale } = useIntl();
   const [data, setData] = useState(store.chart(id));
 
@@ -35,14 +34,14 @@ export function OptimizedPriceLine({ store, id, decimals, prevClose, variant, re
       if (timer === undefined) timer = setTimeout(show, delay);
     };
     const unsubscribe = store.subscribeCharts((ids) => {
-      if (ids.includes(id) && !frozen) soon(refreshMs <= 0 ? 0 : Math.max(0, shownAt + refreshMs - performance.now()));
+      if (ids.includes(id)) soon(refreshMs <= 0 ? 0 : Math.max(0, shownAt + refreshMs - performance.now()));
     });
-    soon(0); // what is already there: when it first appears, and when it is unfrozen
+    soon(0); // what is already there, when it first appears
     return () => {
       unsubscribe();
       clearTimeout(timer);
     };
-  }, [store, id, refreshMs, frozen]);
+  }, [store, id, refreshMs]);
 
   return <PriceLine summary={priceSummary(data, decimals, prevClose, locale)} variant={variant} />;
 }

@@ -69,20 +69,6 @@ describe("the Optimized tab, with the real worker and server", () => {
       });
   });
 
-  it("freezes the numbers on screen while updates keep arriving, and catches up when resumed", () => {
-    cy.visit("/");
-    waitForLiveGrid();
-    setRefresh("0");
-    cy.contains("button", "Freeze stream").click().should("have.attr", "aria-pressed", "true");
-    lastOfFirstRow().invoke("text").then((frozen) => {
-      // The market keeps moving behind the frozen grid; the cell does not.
-      cy.get(".hud-metrics").should("contain.text", "Updates per second");
-      lastOfFirstRow().should("have.text", frozen);
-      cy.contains("button", "Freeze stream").click().should("have.attr", "aria-pressed", "false");
-      lastOfFirstRow().should(($cell) => expect($cell.text()).not.to.equal(frozen));
-    });
-  });
-
   it("sorts and filters while the market keeps moving", () => {
     cy.visit("/");
     waitForLiveGrid();

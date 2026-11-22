@@ -791,4 +791,20 @@ describe("NaivePage: the watchlist", () => {
       cy.get(".chaos-row button").first().should("be.disabled");
     });
   });
+
+  describe("the toolbar and the performance panel", () => {
+    it("puts the record button beside the watchlist toggle, both at the right-hand end", () => {
+      goLive();
+      cy.get(".toolbar-end").children().should("have.length", 2);
+      cy.get(".toolbar-end > :first-child").should("have.class", "record-button");
+      cy.get(".toolbar-end > :last-child").should("have.class", "watchlist-toggle");
+    });
+
+    it("has a performance panel that can be collapsed to its heading", () => {
+      goLive();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(true));
+      cy.contains("summary", "Performance").click();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(false));
+    });
+  });
 });

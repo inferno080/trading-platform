@@ -12,12 +12,11 @@ const send = (store: FeedStore, data: Float64Array, id = ID) => store.setCharts(
 interface Options {
   unavailable?: boolean;
   refreshMs?: number;
-  frozen?: boolean;
 }
-const chartElement = (store: FeedStore, { unavailable = false, refreshMs = 0, frozen = false }: Options = {}) =>
+const chartElement = (store: FeedStore, { unavailable = false, refreshMs = 0 }: Options = {}) =>
   withI18n(
     <>
-      <OptimizedChart store={store} id={ID} symbol="AAA" decimals={2} prevClose={29800} unavailable={unavailable} refreshMs={refreshMs} frozen={frozen} />
+      <OptimizedChart store={store} id={ID} symbol="AAA" decimals={2} prevClose={29800} unavailable={unavailable} refreshMs={refreshMs} />
       <p id="elsewhere">elsewhere</p>
     </>,
   );
@@ -103,23 +102,6 @@ describe("OptimizedChart", () => {
         for (let i = 0; i < 20; i++) send(store, rising(300, 30000 + i * 100));
       });
       cy.get("canvas.chart-canvas").should("have.attr", "aria-label").and("match", /last 3\d\d\.\d\d/);
-    });
-  });
-
-  describe("when frozen", () => {
-    it("holds still: changes are not drawn", () => {
-      const store = mountChart(new FeedStore(), { frozen: true });
-      cy.then(() => send(store, rising()));
-      afterFrames(15);
-      ink().should("equal", 0);
-    });
-
-    it("catches up at once when unfrozen", () => {
-      const store = mountChart(new FeedStore(), { frozen: true });
-      cy.then(() => send(store, rising()));
-      afterFrames(15);
-      cy.mount(chartElement(store, { frozen: false }));
-      cy.get("canvas.chart-canvas").should(($c) => expect(countInk($c[0] as HTMLCanvasElement)).to.be.greaterThan(500));
     });
   });
 

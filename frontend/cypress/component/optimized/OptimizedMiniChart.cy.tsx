@@ -10,13 +10,12 @@ const climbing = data(Array.from({ length: 60 }, (_, i) => 30000 + i * 5));
 const falling = data(Array.from({ length: 60 }, (_, i) => 30000 - i * 5));
 const send = (store: FeedStore, values: Float64Array, id = ID) => store.setCharts([{ id, data: values }]);
 
-const miniElement = (store: FeedStore, options: { refreshMs?: number; frozen?: boolean } = {}) =>
-  withI18n(<OptimizedMiniChart store={store} id={ID} symbol="AAB" decimals={2} prevClose={30000} refreshMs={options.refreshMs ?? 0} frozen={options.frozen ?? false} />);
-const mountMini = (store = new FeedStore(), options: { refreshMs?: number; frozen?: boolean } = {}) => {
+const miniElement = (store: FeedStore, options: { refreshMs?: number } = {}) =>
+  withI18n(<OptimizedMiniChart store={store} id={ID} symbol="AAB" decimals={2} prevClose={30000} refreshMs={options.refreshMs ?? 0} />);
+const mountMini = (store = new FeedStore(), options: { refreshMs?: number } = {}) => {
   cy.mount(miniElement(store, options));
   return store;
 };
-const inkNow = () => cy.get("canvas.mini-canvas").then(($c) => countInk($c[0] as HTMLCanvasElement));
 
 describe("OptimizedMiniChart", () => {
   it("shows a small skeleton, announced as loading, until its history has been drawn", () => {
@@ -74,14 +73,5 @@ describe("OptimizedMiniChart", () => {
     afterFrames(20);
     cy.get(".price-line-small").should("have.attr", "data-direction", "1"); // not yet
     cy.get(".price-line-small", { timeout: 5000 }).should("have.attr", "data-direction", "-1");
-  });
-
-  it("holds still while frozen, and catches up when unfrozen", () => {
-    const store = mountMini(new FeedStore(), { frozen: true });
-    cy.then(() => send(store, climbing));
-    afterFrames(15);
-    inkNow().should("equal", 0);
-    cy.mount(miniElement(store, { frozen: false }));
-    cy.get("canvas.mini-canvas").should(($c) => expect(countInk($c[0] as HTMLCanvasElement)).to.be.greaterThan(50));
   });
 });

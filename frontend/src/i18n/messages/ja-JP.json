@@ -50,11 +50,8 @@
   "table.tickSize": "呼値",
   "table.decimals": "小数桁",
   "table.noReference": "この銘柄の参照データがありません",
-  "optimized.freeze": "ストリームを停止",
-  "optimized.frozen": "ストリームを停止中です。更新は受信され続け、画面は停止した時点の表示のままです。",
   "grid.region": "リアルタイム気配値グリッド",
   "optimized.refresh": "更新間隔（秒）",
-  "optimized.refresh.hint": "画面全体の更新間隔です。0で毎フレーム描画します。最大{max, number}秒。",
   "hud.refreshWarning": "画面は{seconds, number}秒ごとに更新されるため、実際の負荷より数値が良く見えます。公平なベンチマークには更新間隔を0にしてください。",
   "hud.refreshChangedWarning": "記録中に更新間隔が変更されたため、数値が不正確な可能性があります。",
   "chart.title": "{symbol} の価格チャート",
@@ -124,7 +121,6 @@
   "rfq.announce.quotedBuy": "見積りを受信しました：{symbol} {quantity} を {price} で買い。有効時間は{seconds, number}秒です。",
   "rfq.announce.quotedSell": "見積りを受信しました：{symbol} {quantity} を {price} で売り。有効時間は{seconds, number}秒です。",
   "status.reconnecting": "再接続中",
-  "reconnect.attempt": "{attempt, number}回目",
   "reconnect.countdown": "あと{seconds, number}秒で再試行",
   "reconnect.retryNow": "今すぐ再試行",
   "chaos.title": "障害テスト",
@@ -146,5 +142,8 @@
   "chaos.latency.help": "すべての更新を指定のミリ秒だけ遅らせます（0〜5,000）。0で解除します。",
   "chaos.reset.label": "すべての障害を解除",
   "chaos.reset.help": "通常の配信に戻します。",
-  "chaos.sent": "送信しました：{what}"
+  "status.reconnecting.attempt": "再接続中（{attempt, number}回目）",
+  "chaos.sent.plain": "送信しました：{what}",
+  "chaos.sent.seconds": "送信しました：{what}（{value, number}秒）",
+  "chaos.sent.ms": "送信しました：{what}（{value, number}ミリ秒）"
 }

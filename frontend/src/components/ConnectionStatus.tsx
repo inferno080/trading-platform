@@ -34,8 +34,7 @@ export function ConnectionStatus({ status, reconnect, onRetry }: ConnectionStatu
   return (
     <>
       <span className="status" data-status={status} role="status">
-        {t(`status.${status}`)}
-        {waiting && ` (${t("reconnect.attempt", { attempt: reconnect.attempt })})`}
+        {waiting ? t("status.reconnecting.attempt", { attempt: reconnect.attempt }) : t(`status.${status}`)}
       </span>
       {waiting && (
         <>
