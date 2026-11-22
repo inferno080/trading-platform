@@ -420,7 +420,7 @@ td:first-child,
 .symbol-detail-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
@@ -786,8 +786,154 @@ tbody tr {
 .watchlist-toggle,
 .symbol-detail-watch,
 .symbol-detail-close,
+.rfq-open,
 .toast button {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* The ticket for asking a dealer for a quote (see rfq/RfqTicket.tsx) */
+.rfq {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+.rfq h3 {
+  margin: 0 0 var(--space-3);
+  font-size: 0.9375rem;
+}
+.rfq-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+.rfq-side {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.rfq-side label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  font-size: 0.875rem;
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.rfq-side .rfq-side-chosen {
+  font-weight: 700;
+  border-color: var(--color-accent);
+}
+.rfq-quantity {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 0.8125rem;
+}
+.rfq-quantity input {
+  width: 9rem;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.rfq-quantity input[aria-invalid="true"] {
+  border-color: var(--color-down);
+}
+.rfq-hint,
+.rfq-error {
+  margin: var(--space-1) 0 0;
+  font-size: 0.75rem;
+}
+.rfq-hint {
+  color: var(--color-text-muted);
+}
+.rfq-error {
+  color: var(--color-down);
+}
+.rfq-status {
+  margin-top: var(--space-3);
+}
+.rfq-status:empty {
+  display: none;
+}
+.rfq-status:focus-visible {
+  outline-offset: 4px;
+}
+.rfq-message {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.rfq-detail {
+  margin: var(--space-1) 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+.rfq-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+.rfq-countdown[data-low="true"] {
+  color: var(--color-stale); /* amber in the last seconds; the number says it too */
+  font-weight: 700;
+}
+.rfq-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.rfq-actions button,
+.rfq-submit,
+.rfq-again {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.rfq-again {
+  margin-top: var(--space-2);
+}
+.rfq-accept {
+  font-weight: 700;
+  border-color: var(--color-accent);
+}
+
+.rfq-modal {
+  width: min(32rem, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-4);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+.rfq-modal::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+.rfq-modal .rfq {
+  padding-top: 0;
+  border-top: 0;
+}
+.rfq-close {
+  position: absolute;
+  top: var(--space-2);
+  inset-inline-end: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }

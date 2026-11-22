@@ -440,4 +440,37 @@ describe("OptimizedPage: the watchlist", () => {
     cy.get('button[aria-label="Remove AAA from the watchlist"]').focus().realPress("Enter");
     panelItems().should("have.length", 0);
   });
+
+  describe("asking for a quote", () => {
+    it("sends requests, accepts and rejects through the worker, and shows what the worker reports back", () => {
+      mountPage();
+      deliverMarket();
+      cy.contains(".symbol-detail-header button", "Request a quote").click();
+      cy.get("dialog[open] #rfq-quantity").type("250{enter}");
+      worker().then((w) => {
+        const sent = w.posted.find((command) => command.type === "rfq");
+        expect(sent).to.deep.include({ type: "rfq" });
+        const { ref } = (sent as { request: { ref: number } }).request;
+        expect((sent as { request: object }).request).to.deep.include({ t: "rfq", id: 0, side: "buy", quantity: 250 });
+        w.emit({ type: "rfqQuote", quote: { t: "rfqQuote", ref, id: 0, side: "buy", quantity: 250, price: 29925, screenPrice: 29921, validForMs: 10_000 } });
+      });
+      cy.get(".rfq-message").should("contain.text", "You buy 250 AAA at 299.25");
+      cy.contains("button", "Accept").click();
+      worker().then((w) => {
+        expect(w.posted.some((command) => command.type === "rfqAccept")).to.equal(true);
+        const ref = (w.posted.find((command) => command.type === "rfqAccept") as { ref: number }).ref;
+        w.emit({ type: "rfqResult", result: { t: "rfqResult", ref, outcome: "filled", price: 29925, tradeId: 4 } });
+      });
+      cy.get(".rfq-message").should("contain.text", "Done: bought 250 AAA at 299.25");
+    });
+
+    it("fails the request when the worker says the connection is gone", () => {
+      mountPage();
+      deliverMarket();
+      cy.contains("button", "Request a quote").click();
+      cy.get("#rfq-quantity").type("10{enter}");
+      worker().then((w) => w.emit({ type: "status", status: "closed" }));
+      cy.get(".rfq-message").should("contain.text", "request was cancelled");
+    });
+  });
 });

@@ -23,6 +23,14 @@ export const config = {
   activitySkew: num("ACTIVITY_SKEW", 1),
   /** Most instruments one client may subscribe to (depth and trades) at once. */
   maxSubscriptions: num("MAX_SUBSCRIPTIONS", 5),
+  /** How long a dealer's quote stays good, in milliseconds. */
+  rfqValidMs: num("RFQ_VALID_MS", 10_000),
+  /** The largest quantity a quote is given for. */
+  rfqMaxQuantity: num("RFQ_MAX_QUANTITY", 1_000_000),
+  /** How long the simulated dealer takes to answer a request, at least (milliseconds). */
+  rfqThinkMs: num("RFQ_THINK_MS", 400),
+  /** How many requests one client may have waiting for a quote or holding one at once. */
+  rfqMaxOpen: num("RFQ_MAX_OPEN", 3),
   /** Rungs on each side of the order book. */
   depthLevels: num("DEPTH_LEVELS", 10),
   /** How many price history points are kept per instrument (one per interval: 300 at 1 s is the last 5 minutes). */

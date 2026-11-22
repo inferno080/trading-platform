@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkerFactory } from "../feed/FeedWorkerContext";
 import type { FeedStatus, WorkerEvent } from "../feed/messages";
 import type { WorkerLike } from "../feed/FeedWorkerContext";
 import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
 import type { Session } from "../protocol/messages";
+import { RfqBridge, type RfqPort } from "../rfq/bridge";
 import { FeedStore } from "./feedStore";
 
 /** What the page shows about the connection. The prices themselves live in the store, not here. */
@@ -36,6 +37,11 @@ export const initialFeedState: FeedWorkerState = {
   chartUnavailable: [],
 };
 
+const withSnapshot = (state: FeedWorkerState): FeedWorkerState => (state.hasSnapshot ? state : { ...state, hasSnapshot: true });
+
+const withUnavailable = (state: FeedWorkerState, id: number): FeedWorkerState =>
+  state.chartUnavailable.includes(id) ? state : { ...state, chartUnavailable: [...state.chartUnavailable, id] };
+
 /**
  * The new state after one event from the worker. Batches change nothing here, so the page does not render
  * 60 times a second: their rows go to the store and the grid draws them.
@@ -55,11 +61,11 @@ export function reduceWorkerEvent(state: FeedWorkerState, event: WorkerEvent): F
     case "referenceTimeout":
       return { ...state, referenceMissing: true };
     case "snapshot":
-      return state.hasSnapshot ? state : { ...state, hasSnapshot: true };
-    case "batch":
-      return state;
+      return withSnapshot(state);
     case "chartUnavailable":
-      return state.chartUnavailable.includes(event.id) ? state : { ...state, chartUnavailable: [...state.chartUnavailable, event.id] };
+      return withUnavailable(state, event.id);
+    default:
+      return state; // batches change nothing here (see above), and the dealer's replies go to the ticket, not to the page's state
   }
 }
 
@@ -86,11 +92,23 @@ export const RESUME_GRACE_MS = 1_000;
  * request outstanding. The pace is therefore set by the page: if drawing is slow, frames are late, requests are
  * late, and the worker simply conflates more.
  */
-export function useFeedWorker(selectedId: number | null = null, watchlist: number[] = NO_IDS): { state: FeedWorkerState; store: FeedStore } {
+export function useFeedWorker(
+  selectedId: number | null = null,
+  watchlist: number[] = NO_IDS,
+): { state: FeedWorkerState; store: FeedStore; rfq: RfqPort } {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
   const [store] = useState(() => new FeedStore());
   const worker = useRef<WorkerLike | null>(null);
+  // How a ticket talks to the server: through the worker, which owns the connection. What comes back is passed on to it.
+  const [bridge] = useState(
+    () =>
+      new RfqBridge({
+        request: (request) => worker.current?.postMessage({ type: "rfq", request: { t: "rfq", ...request } }),
+        accept: (ref) => worker.current?.postMessage({ type: "rfqAccept", ref }),
+        reject: (ref) => worker.current?.postMessage({ type: "rfqReject", ref }),
+      }),
+  );
   const selected = useRef(selectedId); // what a worker started later should be told
   const watched = useRef(watchlist);
 
@@ -104,6 +122,9 @@ export function useFeedWorker(selectedId: number | null = null, watchlist: numbe
 
     connection.onmessage = (event) => {
       const message = event.data;
+      if (message.type === "rfqQuote") bridge.emit({ type: "quote", quote: message.quote });
+      else if (message.type === "rfqResult") bridge.emit({ type: "result", result: message.result });
+      else if (message.type === "status" && message.status !== "live" && message.status !== "connecting") bridge.emit({ type: "disconnected" });
       if (message.type === "reference") store.setReference(message.instruments, Date.now());
       else if (message.type === "snapshot") store.setSnapshot(message.quotes, Date.now());
       else if (message.type === "batch") {
@@ -149,7 +170,7 @@ export function useFeedWorker(selectedId: number | null = null, watchlist: numbe
       connection.terminate();
       worker.current = null;
     };
-  }, [createWorker, store]);
+  }, [createWorker, store, bridge]);
 
   // Tell the worker which instrument's chart is open and which are on the watchlist, and drop the charts of any that no
   // longer are, so one that comes back starts from its skeleton again.
@@ -166,5 +187,6 @@ export function useFeedWorker(selectedId: number | null = null, watchlist: numbe
     store.keepCharts(new Set([...watchlist, ...(selectedId === null ? [] : [selectedId])]));
   }, [store, selectedId, watchlist]);
 
-  return { state, store };
+  const rfq = useMemo(() => bridge.port, [bridge]);
+  return { state, store, rfq };
 }

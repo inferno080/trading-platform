@@ -5,6 +5,7 @@ import { History } from "../sim/history.js";
 import { decodeClientMessage, encodeMessage } from "../protocol/codec.js";
 import { Chaos } from "./chaos.js";
 import { startTicker } from "./ticker.js";
+import { RfqDesk } from "./rfq.js";
 import { Subscriptions } from "./subscriptions.js";
 import {
   PROTOCOL_VERSION,
@@ -28,6 +29,13 @@ setInterval(() => history.record(Date.now(), (id) => sim.lastPrice(id)), config.
 
 // Which clients watch which instruments (depth ladder and trades), up to a limit per client.
 const subs = new Subscriptions<WebSocket>(sim.size, config.maxSubscriptions);
+
+// The simulated dealer, who answers requests for quotes.
+const desk = new RfqDesk<WebSocket>(
+  { validMs: config.rfqValidMs, maxQuantity: config.rfqMaxQuantity, thinkMs: config.rfqThinkMs, maxOpen: config.rfqMaxOpen },
+  (id) => sim.screen(id),
+  (ws, message) => sendReply(ws, encodeMessage(message)),
+);
 
 const chaos = new Chaos();
 let seq = 0;
@@ -146,10 +154,20 @@ wss.on("connection", (ws) => {
       case "history":
         handleHistory(ws, msg.id);
         break;
+      case "rfq":
+        desk.request(ws, msg);
+        break;
+      case "rfqAccept":
+        desk.accept(ws, msg);
+        break;
+      case "rfqReject":
+        desk.reject(ws, msg);
+        break;
     }
   });
   // However the connection ended, stop recording trades for instruments nobody else watches.
   ws.on("close", () => {
+    desk.release(ws); // its pending requests and held quotes go with it
     for (const id of subs.release(ws)) if (!subs.isWatched(id)) sim.unwatch(id);
   });
 });

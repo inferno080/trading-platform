@@ -27,6 +27,8 @@ scope.onmessage = (event) => {
   if (command.type === "connect") connection.connect(command.url);
   else if (command.type === "select") connection.select(command.id);
   else if (command.type === "watch") connection.watch(command.ids);
+  else if (command.type === "rfq") connection.requestQuote(command.request);
+  else if (command.type === "rfqAccept" || command.type === "rfqReject") connection.answerQuote(command.type, command.ref);
   else connection.pull();
 };
 

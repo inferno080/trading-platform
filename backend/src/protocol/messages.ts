@@ -124,7 +124,55 @@ export interface Rejected {
   reason: "limit" | "unknown-instrument"; // limit: the client already has the most subscriptions allowed
 }
 
-export type ServerMessage = Session | Snapshot | Delta | ReferenceData | Depth | Trades | HistoryData | Rejected;
+/** Which way a client wants to trade. */
+export type Side = "buy" | "sell";
+
+/**
+ * A quote the dealer is offering, in reply to an RfqRequest. It is good for `validForMs` from when it is sent. `price` is
+ * a wire integer, like every price; `screenPrice` is what the screen showed (the ask for a buy, the bid for a sell), so
+ * the client can show how much worse the price is for this size.
+ */
+export interface RfqQuote {
+  t: "rfqQuote";
+  ref: number; // the client's own id for the request
+  id: number; // the instrument
+  side: Side;
+  quantity: number;
+  price: number;
+  screenPrice: number;
+  validForMs: number;
+}
+
+/** How a request ended. */
+export type RfqOutcome = "filled" | "rejected" | "expired" | "declined" | "unknown";
+
+/**
+ * The end of a request: the trade (filled), or why there was none. A request ends exactly once; asking again about an
+ * ended request gets the same result back, so accepting twice cannot trade twice.
+ */
+export interface RfqResult {
+  t: "rfqResult";
+  ref: number;
+  outcome: RfqOutcome; // "unknown": the server has no such request (for example after a reconnect)
+  id?: number;
+  side?: Side;
+  quantity?: number;
+  price?: number; // the price traded at, when filled
+  tradeId?: number; // the server's reference for the trade, when filled
+  reason?: "quantity" | "unknown-instrument" | "busy"; // why a request was declined
+}
+
+export type ServerMessage =
+  | Session
+  | Snapshot
+  | Delta
+  | ReferenceData
+  | Depth
+  | Trades
+  | HistoryData
+  | Rejected
+  | RfqQuote
+  | RfqResult;
 
 export interface ResyncRequest {
   t: "resync";
@@ -167,7 +215,31 @@ export interface HistoryRequest {
   id: number;
 }
 
+/** Asks the dealer for a price for a size (a request for quote, RFQ). Answered with an RfqQuote, or an RfqResult if declined. */
+export interface RfqRequest {
+  t: "rfq";
+  ref: number; // the client's own id for this request, which it uses to accept or reject
+  id: number; // the instrument
+  side: Side;
+  quantity: number;
+}
+
+/** Accepts a quote: trades at its price, if it is still valid. */
+export interface RfqAccept {
+  t: "rfqAccept";
+  ref: number;
+}
+
+/** Turns a quote down. */
+export interface RfqReject {
+  t: "rfqReject";
+  ref: number;
+}
+
 export type ClientMessage =
+  | RfqRequest
+  | RfqAccept
+  | RfqReject
   | ResyncRequest
   | ReferenceRequest
   | ChaosCommand

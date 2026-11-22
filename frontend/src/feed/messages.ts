@@ -1,4 +1,4 @@
-import type { DepthLevel, InstrumentReference, Quote, Session, Trade } from "../protocol/messages";
+import type { DepthLevel, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, Trade } from "../protocol/messages";
 
 /** Where the connection stands. */
 export type FeedStatus = "connecting" | "live" | "closed" | "error";
@@ -40,7 +40,10 @@ export type WorkerCommand =
   | { type: "connect"; url: string }
   | { type: "pull" } // "send me what changed since the last pull": the page asks once per animation frame
   | { type: "select"; id: number | null } // the instrument whose price chart the page shows (null: none)
-  | { type: "watch"; ids: number[] }; // the instruments on the watchlist: each is subscribed to and has a chart kept up to date
+  | { type: "watch"; ids: number[] } // the instruments on the watchlist: each is subscribed to and has a chart kept up to date
+  | { type: "rfq"; request: RfqRequest } // ask the dealer for a quote
+  | { type: "rfqAccept"; ref: number } // accept a quote
+  | { type: "rfqReject"; ref: number }; // turn a quote down
 
 /** From the worker to the page. */
 export type WorkerEvent =
@@ -52,4 +55,6 @@ export type WorkerEvent =
   | { type: "referenceTimeout" } // the reference data has not arrived in time
   | { type: "snapshot"; quotes: Quote[] } // the full state, sent on connect and again after a gap
   | { type: "batch"; updates: Quote[]; stats: FeedStats; charts?: ChartUpdate[]; depth?: DepthUpdate; trades?: TradesUpdate } // the latest state of every instrument that changed since the last pull, every tracked chart that changed, and the open instrument's order book and new trades
-  | { type: "chartUnavailable"; id: number }; // the server has no price history for a tracked instrument
+  | { type: "chartUnavailable"; id: number } // the server has no price history for a tracked instrument
+  | { type: "rfqQuote"; quote: RfqQuote } // the dealer's quote for a request
+  | { type: "rfqResult"; result: RfqResult }; // how a request ended

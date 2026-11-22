@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { appendTick, flatten } from "../chart/series";
+import { RfqBridge } from "../rfq/bridge";
 import { WS_URL } from "../feed/url";
 import { collector } from "../hud/collector";
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
@@ -7,13 +8,16 @@ import {
   PROTOCOL_VERSION,
   type InstrumentReference,
   type Quote,
+  type Delta,
   type Depth,
   type HistoryData,
   type QuoteUpdate,
+  type ReferenceData,
   type Rejected,
   type Trade,
   type Trades,
   type Session,
+  type Snapshot,
 } from "../protocol/messages";
 
 export type FeedStatus = "connecting" | "live" | "closed" | "error";
@@ -105,6 +109,24 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
   const requested = useRef(new Set<number>()); // histories asked for on this connection
   const subscribed = useRef(new Set<number>()); // watchlist subscriptions made on this connection
   const sync = useRef<() => void>(() => undefined);
+  // How a ticket talks to the server: this page sends from its own socket. What comes back is passed on to it.
+  const [bridge] = useState(() => {
+    const send = (message: Parameters<typeof encodeClientMessage>[0]): boolean => {
+      const ws = socket.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(encodeClientMessage(message));
+      return true;
+    };
+    const bridge: RfqBridge = new RfqBridge({
+      request: (request) => {
+        // With no open connection the request cannot be made, which the ticket is told as a lost request.
+        if (!send({ t: "rfq", ...request })) bridge.emit({ type: "result", result: { t: "rfqResult", ref: request.ref, outcome: "unknown" } });
+      },
+      accept: (ref) => void send({ t: "rfqAccept", ref }),
+      reject: (ref) => void send({ t: "rfqReject", ref }),
+    });
+    return bridge;
+  });
   const openId = useRef<number | null>(selectedId); // the open instrument, which the socket's handlers compare with
 
   // Make what the server knows match what the page wants: history for each tracked instrument, subscriptions for the
@@ -159,8 +181,31 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
       subscribed.current.clear();
       sync.current();
     };
-    ws.onclose = () => setStatus((s) => (s === "error" ? s : "closed"));
+    ws.onclose = () => {
+      setStatus((s) => (s === "error" ? s : "closed"));
+      bridge.emit({ type: "disconnected" });
+    };
     ws.onerror = () => setStatus("error");
+
+    // The messages that are not the market itself: the open instrument's chart, order book and trades, and the dealer's replies.
+    const handleDetail = (msg: Exclude<ReturnType<typeof decodeServerMessage>, Session | ReferenceData | Snapshot | Delta>): void => {
+      switch (msg.t) {
+        case "depth":
+        case "trades":
+          applyBookMessage(msg, openId.current, setBook);
+          break;
+        case "history":
+        case "rejected":
+          applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
+          break;
+        case "rfqQuote":
+          bridge.emit({ type: "quote", quote: msg });
+          break;
+        case "rfqResult":
+          bridge.emit({ type: "result", result: msg });
+          break;
+      }
+    };
 
     ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       const msg = decodeServerMessage(new Uint8Array(event.data));
@@ -206,15 +251,8 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
           foldTicks(setCharts, tracked.current, msg.updates);
           break;
 
-        case "depth":
-        case "trades":
-          applyBookMessage(msg, openId.current, setBook);
-          break;
-
-        case "history":
-        case "rejected":
-          applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
-          break;
+        default:
+          handleDetail(msg);
       }
     };
 
@@ -223,7 +261,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
       ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
       ws.close();
     };
-  }, []);
+  }, [bridge]);
 
-  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book };
+  return { status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq: bridge.port };
 }
