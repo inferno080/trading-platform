@@ -72,19 +72,16 @@ const STALE_RULE = (params: { data?: Row }) => params.data?.stale === true;
  * `refreshMs` is how often the grid redraws: 0 draws every change as it arrives, and anything else collects the changes
  * (keeping the latest state of each row) and draws them all together once per interval, so the numbers stay readable.
  * The store keeps receiving at full speed either way.
- *
- * While `frozen`, the grid draws nothing so the numbers hold still; unfreezing redraws from the store in one step.
  */
 interface QuotesGridProps {
   store: FeedStore;
-  frozen: boolean;
   refreshMs: number;
   /** The instrument whose chart is open, if any, and how to open one (a click on its row, or Enter on a cell in it). */
   selectedId?: number | null;
   onSelect?: (id: number) => void;
 }
 
-export function QuotesGrid({ store, frozen, refreshMs, selectedId = null, onSelect }: QuotesGridProps) {
+export function QuotesGrid({ store, refreshMs, selectedId = null, onSelect }: QuotesGridProps) {
   const t = useT();
   const { locale } = useIntl();
   const reducedMotion = usePrefersReducedMotion();
@@ -108,8 +105,7 @@ export function QuotesGrid({ store, frozen, refreshMs, selectedId = null, onSele
   );
 
   useEffect(() => {
-    if (frozen) return; // nothing is drawn while frozen
-    api.current?.setGridOption("rowData", store.rows); // catch up on whatever was missed while frozen or before a new interval
+    api.current?.setGridOption("rowData", store.rows); // catch up on whatever was missed before a new interval
     const pending = new Map<number, Row>(); // changed rows waiting for the next redraw, the latest of each
 
     const flush = () => {
@@ -137,7 +133,7 @@ export function QuotesGrid({ store, frozen, refreshMs, selectedId = null, onSele
       unsubscribe();
       clearInterval(timer);
     };
-  }, [store, frozen, refreshMs]);
+  }, [store, refreshMs]);
 
   // Alt+Down on a focused column heading opens that column's filter, the usual key for opening a menu. (Ctrl+Enter, the
   // grid's own key, still works.) It presses the heading's filter button, so it does exactly what a click does.

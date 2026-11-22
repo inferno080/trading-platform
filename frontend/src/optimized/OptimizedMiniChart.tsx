@@ -15,20 +15,18 @@ interface OptimizedMiniChartProps {
   symbol: string;
   decimals: number;
   prevClose: number;
-  /** The same refresh interval and Freeze as the quotes and the big chart. */
+  /** The same refresh interval as the quotes and the big chart. */
   refreshMs: number;
-  frozen: boolean;
 }
 
 /**
  * A watchlist mini chart drawn from the store, not from React state: the canvas is drawn directly, at most once per
  * refresh interval, so a tick causes no React render of the chart. The price above it is a tiny component of its own.
  */
-export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, refreshMs, frozen }: OptimizedMiniChartProps) {
+export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, refreshMs }: OptimizedMiniChartProps) {
   const t = useT();
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
-  const shown = useRef<Float64Array | undefined>(undefined); // what was last drawn: a frozen chart redraws this, not newer data
   const size = useCanvasSize(canvas);
   const themeVersion = useThemeVersion();
   const [painted, setPainted] = useState(false); // the skeleton stays until the chart has really been drawn once
@@ -40,9 +38,8 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, ref
     const draw = () => {
       frame = 0;
       const context = canvas.current?.getContext("2d");
-      const data = frozen ? shown.current : store.chart(id); // frozen: hold the view, even through a resize or a new theme
+      const data = store.chart(id);
       if (!context || !data || size.width === 0) return;
-      shown.current = data;
       drawSparkline(context, data, size, readChartColors(), prevClose);
       drawnAt = performance.now();
       setPainted(true);
@@ -62,20 +59,19 @@ export function OptimizedMiniChart({ store, id, symbol, decimals, prevClose, ref
       }
     };
     const unsubscribe = store.subscribeCharts((ids) => {
-      if (!ids.includes(id)) return;
-      if (!frozen) schedule();
+      if (ids.includes(id)) schedule();
     });
-    scheduleNow(); // what is already there: after a resize, a theme change, a new language, or unfreezing
+    scheduleNow(); // what is already there: after a resize, a theme change or a new language
     return () => {
       unsubscribe();
       clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs, frozen]);
+  }, [store, id, size, decimals, prevClose, locale, themeVersion, symbol, t, refreshMs]);
 
   return (
     <div className="mini-chart">
-      <OptimizedPriceLine store={store} id={id} decimals={decimals} prevClose={prevClose} variant="small" refreshMs={refreshMs} frozen={frozen} />
+      <OptimizedPriceLine store={store} id={id} decimals={decimals} prevClose={prevClose} variant="small" refreshMs={refreshMs} />
       <div className="mini-area">
         <canvas ref={canvas} className="mini-canvas" role="img" aria-label={symbol} data-ready={painted} />
         {!painted && (

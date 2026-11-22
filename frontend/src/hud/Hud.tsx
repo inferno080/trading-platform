@@ -1,22 +1,8 @@
-import { useRef, useState } from "react";
 import { useIntl } from "react-intl";
 import { useT } from "../i18n/useT";
 import { decimalFormatter, integerFormatter, millisecondFormatter } from "../lib/format";
-import type { Session } from "../protocol/messages";
-import {
-  RECORD_SECONDS,
-  WARMUP_SECONDS,
-  advanceRecording,
-  buildResult,
-  downloadJson,
-  recordingStateAfter,
-  resultFileName,
-  type HudSample,
-  type PipelineMode,
-  type RecordState,
-  type Recording,
-} from "./recorder";
-import { useHudSampler } from "./useHudSampler";
+import { RECORD_SECONDS, type HudSample, type RecordState } from "./recorder";
+import type { HudState } from "./useHud";
 
 type Translate = ReturnType<typeof useT>;
 
@@ -64,74 +50,58 @@ function RefreshWarning({ seconds }: { seconds: number | null }) {
   return <p className="hud-note hud-warning">{t("hud.refreshWarning", { seconds })}</p>;
 }
 
+/** The button that records a run to a JSON file. It sits in the page's toolbar; its state comes from `useHud`. */
+export function RecordButton({ hud }: { hud: HudState }) {
+  const t = useT();
+  const { record } = hud;
+  return (
+    <button
+      type="button"
+      className="record-button"
+      data-phase={record.status === "recording" ? record.phase : undefined}
+      onClick={hud.startRecording}
+      disabled={record.status === "recording" || !hud.canRecord}
+    >
+      {recordLabel(record, t)}
+    </button>
+  );
+}
+
 interface HudProps {
-  session: Session | null;
-  mode: PipelineMode;
+  hud: HudState;
   /** How often the display refreshes, in seconds (0 for every change), for tabs that have that setting. */
   refreshSeconds?: number | null;
 }
 
-/** Performance panel: live frame rate and feed stats, plus a button that records a run to a JSON file. */
-export function Hud({ session, mode, refreshSeconds = null }: HudProps) {
+/**
+ * Performance panel: live frame rate and feed stats. It can be collapsed to its heading; the numbers are still sampled
+ * while it is (see useHud). Its warnings collapse with it; the note below it, saying where a recorded run was saved, stays in
+ * view, since it is announced to screen readers.
+ */
+export function Hud({ hud, refreshSeconds = null }: HudProps) {
   const intl = useIntl();
   const t = useT();
-  const [sample, setSample] = useState<HudSample | null>(null);
-  const [record, setRecord] = useState<RecordState>({ status: "idle" });
-  const recording = useRef<Recording | null>(null);
-
-  // Runs once a second with the newest sample; while a run is recording it counts the second and saves the file at the end.
-  useHudSampler((next, latencies) => {
-    setSample(next);
-    const run = recording.current;
-    if (!run) return;
-
-    advanceRecording(run, next, latencies, document.hidden, refreshSeconds);
-    const progress = recordingStateAfter(run.tick);
-    if (progress) {
-      setRecord(progress);
-      return;
-    }
-    const fileName = resultFileName(mode, session);
-    downloadJson(fileName, buildResult(run, mode, session));
-    recording.current = null;
-    setRecord({ status: "done", fileName, tabHidden: run.tabHidden, refreshChanged: run.refreshChanged });
-  });
-
-  const startRecording = () => {
-    recording.current = { tick: 0, samples: [], latencies: [], tabHidden: false, refreshSeconds, refreshChanged: false };
-    setRecord({ status: "recording", phase: "warmup", remaining: WARMUP_SECONDS });
-  };
-
-  const isRecording = record.status === "recording";
 
   return (
     <section className="hud" aria-labelledby="hud-title">
-      <div className="hud-header">
-        <h2 id="hud-title">{t("hud.title")}</h2>
-        <button
-          type="button"
-          className="record-button"
-          data-phase={record.status === "recording" ? record.phase : undefined}
-          onClick={startRecording}
-          disabled={isRecording || !session}
-        >
-          {recordLabel(record, t)}
-        </button>
-      </div>
+      <details open>
+        <summary>
+          <h2 id="hud-title">{t("hud.title")}</h2>
+        </summary>
+        {/* Numbers change every second, so this is deliberately not a live region. */}
+        <dl className="hud-metrics">
+          {formatMetrics(hud.sample, intl.locale, t).map(([label, value]) => (
+            <div className="hud-metric" key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {!import.meta.env.PROD && <p className="hud-note hud-warning">{t("hud.devWarning")}</p>}
+        <RefreshWarning seconds={refreshSeconds} />
+      </details>
 
-      {/* Numbers change every second, so this is deliberately not a live region. */}
-      <dl className="hud-metrics">
-        {formatMetrics(sample, intl.locale, t).map(([label, value]) => (
-          <div className="hud-metric" key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-
-      {!import.meta.env.PROD && <p className="hud-note hud-warning">{t("hud.devWarning")}</p>}
-      <RefreshWarning seconds={refreshSeconds} />
-      <RecordNote record={record} />
+      <RecordNote record={hud.record} />
     </section>
   );
 }

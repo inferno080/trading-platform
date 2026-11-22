@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
 import { appendTick, flatten } from "../chart/series";
 import { RfqBridge } from "../rfq/bridge";
 import { Reconnector, type ReconnectInfo } from "../feed/reconnect";
@@ -9,6 +10,7 @@ import {
   PROTOCOL_VERSION,
   type ChaosAction,
   type InstrumentReference,
+  type SessionInfo,
   type Quote,
   type Delta,
   type Depth,
@@ -43,6 +45,9 @@ export const applyUpdates = (quotes: Quote[], updates: QuoteUpdate[]): Quote[] =
 /** The price charts of the tracked instruments (the open one and the watchlist's), by instrument id. */
 export type Charts = Record<number, number[]>;
 
+/** The open instrument's longer charts (a day, a month ...), by instrument and range. */
+export type RangeCharts = Record<string, number[]>;
+
 /** How many recent trades the tape keeps. */
 const TAPE_LENGTH = 30;
 
@@ -53,6 +58,47 @@ export interface Book {
 }
 
 const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
+
+/** Naive: a longer chart of the open instrument is copied, with its newest point set to the live price, on every update. */
+function foldRanges(setRanges: (update: (previous: RangeCharts) => RangeCharts) => void, open: number | null, updates: QuoteUpdate[]): void {
+  if (open === null) return;
+  for (const update of updates) {
+    if (update.id !== open) continue;
+    setRanges((previous) => {
+      const keys = Object.keys(previous).filter((key) => key.startsWith(`${open}:`));
+      if (keys.length === 0) return previous;
+      const next = { ...previous };
+      for (const key of keys) {
+        const data = previous[key]!.slice();
+        data[data.length - 1] = update.last;
+        next[key] = data;
+      }
+      return next;
+    });
+  }
+}
+
+/** The sessions with only the open instrument's kept (the same object when nothing changes, so the page does not render again). */
+function onlySessionOf(sessions: Record<number, SessionInfo>, open: number | null): Record<number, SessionInfo> {
+  const keep = open !== null ? sessions[open] : undefined;
+  if (keep) return Object.keys(sessions).length === 1 ? sessions : { [open!]: keep };
+  return Object.keys(sessions).length === 0 ? sessions : {};
+}
+
+/** A longer chart for the open instrument arrived: keep it. Returns false for a reply that is not one (the five-minute chart, or a refusal). */
+function applyRangeReply(
+  msg: HistoryData | Rejected,
+  open: number | null,
+  setRanges: (update: (previous: RangeCharts) => RangeCharts) => void,
+  setSessions: (update: (previous: Record<number, SessionInfo>) => Record<number, SessionInfo>) => void,
+): boolean {
+  if (msg.t !== "history" || !msg.range || msg.range === LIVE_RANGE) return false;
+  if (msg.id !== open) return true;
+  setRanges((previous) => ({ ...previous, [rangeKey(msg.id, msg.range)]: flatten(msg.points) }));
+  const { session } = msg;
+  if (session) setSessions((previous) => ({ ...previous, [msg.id]: session }));
+  return true;
+}
 
 /** Naive: every update of a tracked instrument copies its whole chart (and the lot of them) and sets state again. */
 function foldTicks(setCharts: (update: (previous: Charts) => Charts) => void, tracked: ReadonlySet<number>, updates: QuoteUpdate[]): void {
@@ -95,7 +141,7 @@ function applyChartReply(
  * Once per connection, right after the session, it asks the server for the reference data (names, currencies,
  * decimals and previous closes). That data is static, so it is kept apart from the quotes that change every frame.
  */
-export function useNaiveFeed(selectedId: number | null = null, watchlist: number[] = NO_IDS) {
+export function useNaiveFeed(selectedId: number | null = null, watchlist: number[] = NO_IDS, range: HistoryRange = LIVE_RANGE) {
   const [status, setStatus] = useState<FeedStatus>("connecting");
   const [reconnect, setReconnect] = useState<ReconnectInfo | null>(null);
   const retryNow = useRef<() => void>(() => undefined);
@@ -107,6 +153,10 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
   // The price charts of the tracked instruments, and the ones the server has no history for.
   const [charts, setCharts] = useState<Charts>({});
   const [chartUnavailable, setChartUnavailable] = useState<number[]>([]);
+  const [rangeCharts, setRangeCharts] = useState<RangeCharts>({}); // the open instrument's longer charts
+  const [sessions, setSessions] = useState<Record<number, SessionInfo>>({}); // the market session of the open instrument's longer charts
+  const requestedRanges = useRef(new Set<string>()); // longer charts asked for on this connection
+  const syncRange = useRef<() => void>(() => undefined);
   const [book, setBook] = useState<Book>({ depth: null, tape: [] });
   const socket = useRef<WebSocket | null>(null);
   const tracked = useRef<ReadonlySet<number>>(new Set()); // read by the socket's handlers, which are set up once
@@ -172,6 +222,27 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
     sync.current();
   }, [selectedId, watchlist]);
 
+  // Ask for the open instrument's chart over the chosen range, once, and forget the longer charts of any other instrument.
+  // Apart from the effect above, so changing the range does not reset the order book.
+  useEffect(() => {
+    syncRange.current = () => {
+      const prefix = selectedId === null ? null : `${selectedId}:`;
+      for (const key of [...requestedRanges.current]) if (!prefix || !key.startsWith(prefix)) requestedRanges.current.delete(key);
+      setRangeCharts((previous) => {
+        const kept = Object.keys(previous).filter((key) => prefix !== null && key.startsWith(prefix));
+        return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept.map((key) => [key, previous[key]!]));
+      });
+      setSessions((previous) => onlySessionOf(previous, selectedId));
+      const ws = socket.current;
+      if (selectedId === null || range === LIVE_RANGE || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const key = rangeKey(selectedId, range);
+      if (requestedRanges.current.has(key)) return;
+      requestedRanges.current.add(key);
+      ws.send(encodeClientMessage({ t: "history", id: selectedId, range }));
+    };
+    syncRange.current();
+  }, [selectedId, range]);
+
   useEffect(() => {
     let referenceTimer: number | undefined;
     // When the connection is lost it is opened again after a growing wait (the same policy as the Optimized tab's worker).
@@ -193,7 +264,9 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
         setReconnect(null);
         requested.current.clear(); // a new connection knows nothing of what was asked before
         subscribed.current.clear();
+        requestedRanges.current.clear();
         sync.current();
+        syncRange.current();
       };
       // A socket that closes by itself was lost (one closed on purpose has its handlers removed first): wait, then try again.
       ws.onclose = () => {
@@ -213,7 +286,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
             break;
           case "history":
           case "rejected":
-            applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
+            if (!applyRangeReply(msg, openId.current, setRangeCharts, setSessions)) applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
             break;
           case "rfqQuote":
             bridge.emit({ type: "quote", quote: msg });
@@ -268,6 +341,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
             collector.onDelta(msg.updates.length, Date.now() - msg.ts);
             setQuotes((previous) => applyUpdates(previous, msg.updates));
             foldTicks(setCharts, tracked.current, msg.updates);
+            foldRanges(setRangeCharts, openId.current, msg.updates);
             break;
 
           default:
@@ -296,5 +370,5 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
     if (ws?.readyState === WebSocket.OPEN) ws.send(encodeClientMessage(value === undefined ? { t: "chaos", action } : { t: "chaos", action, value }));
   }, []);
 
-  return { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, chartUnavailable, book, rfq: bridge.port };
+  return { sessions, retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq: bridge.port };
 }

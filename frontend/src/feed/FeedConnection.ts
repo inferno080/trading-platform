@@ -1,5 +1,6 @@
 import { decodeServerMessage, encodeClientMessage } from "../protocol/codec";
-import { appendTick } from "../chart/series";
+import { LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
+import { appendTick, flatten } from "../chart/series";
 import { Reconnector } from "./reconnect";
 import {
   PROTOCOL_VERSION,
@@ -13,10 +14,11 @@ import {
   type RfqRequest,
   type ServerMessage,
   type Session,
+  type SessionInfo,
   type Snapshot,
   type Trade,
 } from "../protocol/messages";
-import type { DepthUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
+import type { ChartUpdate, DepthUpdate, FeedStats, FeedStatus, WorkerEvent } from "./messages";
 
 /** How long to wait for the reference data after the session before reporting that it is late. */
 export const REFERENCE_TIMEOUT_MS = 10_000;
@@ -60,6 +62,11 @@ export class FeedConnection {
   private depth: DepthUpdate | null = null; // the open instrument's newest order book, until the next pull
   private newTrades: Trade[] = []; // the open instrument's trades since the last pull, oldest first
   private open = false; // the socket is open, so requests can be sent
+  private range: HistoryRange = LIVE_RANGE; // how far back the open chart goes
+  private rangeSeries = new Map<string, number[]>(); // the open instrument's longer charts, by instrument and range: the flat [time, price, ...] list
+  private changedRanges = new Set<string>(); // longer charts that changed since the last pull
+  private requestedRanges = new Set<string>(); // longer charts asked for on this connection
+  private sessions = new Map<number, SessionInfo>(); // the market session each open instrument's longer charts were made for, until sent
   private url = "";
   private readonly reconnector: Reconnector;
 
@@ -136,6 +143,12 @@ export class FeedConnection {
     this.syncTracking();
   }
 
+  /** The open chart now goes back this far (the last five minutes, a day, a month ...): ask the server for that range of the open instrument. */
+  setRange(range: HistoryRange): void {
+    this.range = range;
+    this.syncTracking();
+  }
+
   /** The watchlist is now these instruments: new ones are subscribed to, removed ones unsubscribed from. */
   watch(ids: number[]): void {
     this.watched = new Set(ids);
@@ -154,7 +167,28 @@ export class FeedConnection {
   private syncTracking(): void {
     for (const id of [...this.series.keys()]) if (!this.isTracked(id)) this.series.delete(id);
     for (const id of [...this.requested]) if (!this.isTracked(id)) this.requested.delete(id);
-    if (this.open && this.socket) this.sendTrackingRequests(this.socket);
+    this.forgetOtherRanges();
+    if (this.open && this.socket) {
+      this.sendTrackingRequests(this.socket);
+      this.requestRange(this.socket);
+    }
+  }
+
+  /** Longer charts are only kept for the open instrument: those of any other are forgotten. */
+  private forgetOtherRanges(): void {
+    const prefix = this.selectedId === null ? null : `${this.selectedId}:`;
+    for (const key of [...this.rangeSeries.keys()]) if (!prefix || !key.startsWith(prefix)) this.rangeSeries.delete(key);
+    for (const key of [...this.requestedRanges]) if (!prefix || !key.startsWith(prefix)) this.requestedRanges.delete(key);
+    for (const id of [...this.sessions.keys()]) if (id !== this.selectedId) this.sessions.delete(id);
+  }
+
+  /** Ask for the open instrument's chart over the chosen range, once (the last five minutes is handled with the tracked charts). */
+  private requestRange(socket: SocketLike): void {
+    if (this.selectedId === null || this.range === LIVE_RANGE) return;
+    const key = rangeKey(this.selectedId, this.range);
+    if (this.requestedRanges.has(key)) return;
+    this.requestedRanges.add(key);
+    socket.send(encodeClientMessage({ t: "history", id: this.selectedId, range: this.range }));
   }
 
   /** The requests that bring the server up to date: histories not yet asked for, and subscriptions added or dropped. */
@@ -202,14 +236,8 @@ export class FeedConnection {
     const stats = this.stats;
     this.stats = emptyStats();
     const batch: Extract<WorkerEvent, { type: "batch" }> = { type: "batch", updates, stats };
-    if (this.changedSeries.size > 0) {
-      batch.charts = [];
-      for (const id of this.changedSeries) {
-        const data = this.series.get(id);
-        if (data) batch.charts.push({ id, data: Float64Array.from(data) });
-      }
-      this.changedSeries.clear();
-    }
+    const charts = this.takeCharts();
+    if (charts.length > 0) batch.charts = charts;
     if (this.depth) {
       batch.depth = this.depth;
       this.depth = null;
@@ -221,6 +249,24 @@ export class FeedConnection {
     this.emit(batch);
   }
 
+  /** The charts that changed since the last pull: the tracked five-minute charts, and the open instrument's longer ones. */
+  private takeCharts(): ChartUpdate[] {
+    const charts: ChartUpdate[] = [];
+    for (const id of this.changedSeries) {
+      const data = this.series.get(id);
+      if (data) charts.push({ id, data: Float64Array.from(data) });
+    }
+    this.changedSeries.clear();
+    for (const key of this.changedRanges) {
+      const data = this.rangeSeries.get(key);
+      const [id, range] = key.split(":");
+      const session = this.sessions.get(Number(id));
+      if (data) charts.push({ id: Number(id), range: range as HistoryRange, ...(session ? { session } : {}), data: Float64Array.from(data) });
+    }
+    this.changedRanges.clear();
+    return charts;
+  }
+
   private resetState(): void {
     this.quotes = [];
     this.changed.clear();
@@ -228,6 +274,10 @@ export class FeedConnection {
     this.stats = emptyStats();
     this.series.clear(); // asked for again once the new connection is open
     this.changedSeries.clear();
+    this.rangeSeries.clear();
+    this.changedRanges.clear();
+    this.sessions.clear();
+    this.requestedRanges.clear();
     this.requested.clear();
     this.subscribed.clear();
     this.depth = null;
@@ -317,16 +367,46 @@ export class FeedConnection {
       this.changed.add(update.id);
     }
     this.foldIntoCharts(updates);
+    this.foldIntoRanges(updates);
   }
 
   /** The server's answer to a request for a tracked instrument's history: the data, or that there is none. */
   private handleChartReply(message: HistoryData | Rejected): void {
+    if (message.t === "history" && message.range && message.range !== LIVE_RANGE) {
+      this.keepRange(message);
+      return;
+    }
     if (!this.isTracked(message.id)) return; // an answer for an instrument that is no longer tracked
     if (message.t === "history") {
       this.series.set(message.id, message.points.flat());
       this.changedSeries.add(message.id);
     } else if (message.request === "history") {
       this.emit({ type: "chartUnavailable", id: message.id });
+    }
+  }
+
+  /** A longer chart for the open instrument arrived (one for another instrument, which is no longer open, is dropped). */
+  private keepRange(message: HistoryData): void {
+    if (message.id !== this.selectedId) return;
+    const key = rangeKey(message.id, message.range);
+    this.rangeSeries.set(key, flatten(message.points));
+    this.changedRanges.add(key);
+    if (message.session) {
+      this.sessions.set(message.id, message.session);
+    }
+  }
+
+  /** The open instrument's longer charts follow its price: their newest point shows the live price. */
+  private foldIntoRanges(updates: QuoteUpdate[]): void {
+    if (this.rangeSeries.size === 0 || this.selectedId === null) return;
+    const prefix = `${this.selectedId}:`;
+    for (const update of updates) {
+      if (update.id !== this.selectedId) continue;
+      for (const [key, data] of this.rangeSeries) {
+        if (!key.startsWith(prefix) || data.length < 2) continue;
+        data[data.length - 1] = update.last;
+        this.changedRanges.add(key);
+      }
     }
   }
 

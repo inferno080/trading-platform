@@ -1,5 +1,6 @@
 import type { ChartUpdate, DepthUpdate, TradesUpdate } from "../feed/messages";
-import type { InstrumentReference, Quote, Trade } from "../protocol/messages";
+import { LIVE_RANGE, rangeKey, type HistoryRange } from "../chart/range";
+import type { InstrumentReference, Quote, SessionInfo, Trade } from "../protocol/messages";
 
 /** How many recent trades are kept for the tape. */
 export const TAPE_LENGTH = 30;
@@ -108,21 +109,34 @@ export class FeedStore {
 
   /** The price charts of the tracked instruments (the open one and the watchlist's), as last sent by the worker. */
   private readonly charts = new Map<number, Float64Array>();
+  private readonly rangeCharts = new Map<string, Float64Array>(); // the open instrument's longer charts, by instrument and range
+  private readonly sessions = new Map<number, SessionInfo>(); // the market session each of those was made for
   private readonly chartListeners = new Set<(ids: number[]) => void>();
 
-  /** One instrument's chart: the flat [time, price, ...] list, or undefined until its history has arrived. */
-  chart(id: number): Float64Array | undefined {
-    return this.charts.get(id);
+  /** One instrument's chart over a range (the last five minutes unless said): the flat [time, price, ...] list, or undefined until its history has arrived. */
+  chart(id: number, range: HistoryRange = LIVE_RANGE): Float64Array | undefined {
+    return range === LIVE_RANGE ? this.charts.get(id) : this.rangeCharts.get(rangeKey(id, range));
+  }
+
+  /** The market session of an instrument's longer charts (which session a day is, and its time zone), once one has arrived. */
+  session(id: number): SessionInfo | undefined {
+    return this.sessions.get(id);
   }
 
   setCharts(updates: ChartUpdate[]): void {
-    for (const update of updates) this.charts.set(update.id, update.data);
+    for (const update of updates) {
+      if (update.session) this.sessions.set(update.id, update.session);
+      if (update.range && update.range !== LIVE_RANGE) this.rangeCharts.set(rangeKey(update.id, update.range), update.data);
+      else this.charts.set(update.id, update.data);
+    }
     this.notifyCharts(updates.map((update) => update.id));
   }
 
   /** Forget the charts of instruments that are no longer tracked, so a later one starts from its skeleton again. */
   keepCharts(ids: ReadonlySet<number>): void {
     for (const id of [...this.charts.keys()]) if (!ids.has(id)) this.charts.delete(id);
+    for (const key of [...this.rangeCharts.keys()]) if (!ids.has(Number(key.split(":")[0]))) this.rangeCharts.delete(key);
+    for (const id of [...this.sessions.keys()]) if (!ids.has(id)) this.sessions.delete(id);
   }
 
   /** Be told, with the instrument ids, when charts change. Returns the way to stop. */

@@ -1,4 +1,5 @@
 import { decode } from "@msgpack/msgpack";
+import type { HistoryRange } from "../../../src/protocol/messages";
 import { collector } from "../../../src/hud/collector";
 import { NaivePage } from "../../../src/naive/NaivePage";
 import { REFERENCE_TIMEOUT_MS } from "../../../src/naive/useNaiveFeed";
@@ -313,11 +314,19 @@ describe("NaivePage and its live feed", () => {
 // ---------- the open chart and the watchlist ----------
 
 // What the page has sent about one instrument, as "type id" strings (history, subscribe, unsubscribe).
+// What the page asked for, as "type id": the five-minute history and the subscriptions (a longer range has its own helper).
 const requests = (): string[] =>
   socket()
-    .sent.map((frame) => decode(frame) as { t: string; id?: number })
-    .filter((message) => message.id !== undefined)
+    .sent.map((frame) => decode(frame) as { t: string; id?: number; range?: string })
+    .filter((message) => message.id !== undefined && message.range === undefined)
     .map((message) => `${message.t} ${message.id}`);
+
+/** The requests for a longer range of the history, as "id range". */
+const rangeRequests = (): string[] =>
+  socket()
+    .sent.map((frame) => decode(frame) as { t: string; id?: number; range?: string })
+    .filter((message) => message.t === "history" && message.range !== undefined)
+    .map((message) => `${message.id} ${message.range}`);
 
 /** A live page with `count` instruments (AAA, AAB, ...), after the first snapshot and the reference data. */
 const goLiveWith = (count: number) => {
@@ -331,6 +340,10 @@ const goLiveWith = (count: number) => {
   cy.get("tbody tr").should("have.length", count);
 };
 const deliverHistory = (id: number, last = 29920, count = 60) => cy.then(() => socket().receive(makeHistory(id, count, last)));
+/** The open chart's data: the page opens on one day, so that is the range its chart is drawn from. */
+const newYork = { market: "us", timeZone: "America/New_York", continuous: false, open: Date.UTC(2026, 10, 18, 14, 30), close: Date.UTC(2026, 10, 18, 21, 0) } as const;
+const deliverOpenChart = (id: number, last = 29920, count = 60, range: HistoryRange = "1d", session?: typeof newYork) =>
+  cy.then(() => socket().receive({ ...makeHistory(id, count, last), range, ...(session ? { session } : {}) }));
 const chartLabel = () => cy.get("canvas.chart-canvas").invoke("attr", "aria-label");
 
 describe("NaivePage: the open chart", () => {
@@ -355,14 +368,14 @@ describe("NaivePage: the open chart", () => {
   it("shows the chart's skeleton until the history arrives, then the chart", () => {
     goLiveWith(3);
     cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
-    deliverHistory(0);
+    deliverOpenChart(0);
     cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
     cy.get(".chart-area .chart-overlay").should("not.exist");
   });
 
   it("folds each live update of the open symbol into its chart", () => {
     goLiveWith(3);
-    deliverHistory(0, 29920);
+    deliverOpenChart(0, 29920);
     chartLabel().should("contain", "last 299.20");
     cy.then(() => socket().receive({ ...makeDelta(6, [makeUpdate(0, { last: 30500, ts: Date.now() + 5000 })]), ts: Date.now() }));
     chartLabel().should("contain", "last 305.00").and("contain", "high 305.00");
@@ -370,7 +383,7 @@ describe("NaivePage: the open chart", () => {
 
   it("does not change the chart for updates of other symbols", () => {
     goLiveWith(3);
-    deliverHistory(0, 29920);
+    deliverOpenChart(0, 29920);
     chartLabel().should("contain", "last 299.20");
     cy.then(() => socket().receive(makeDelta(6, [makeUpdate(1, { last: 99999 }), makeUpdate(2, { last: 99999 })])));
     cy.get("tbody tr").eq(1).find("td").eq(5).should("contain.text", "999.99"); // the table did update
@@ -388,19 +401,19 @@ describe("NaivePage: the open chart", () => {
     goLiveWith(3);
     cy.contains("tbody tr", "AAB").find("button").click();
     cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
-    deliverHistory(0); // the answer for AAA, arriving late
+    deliverOpenChart(0); // the answer for AAA, arriving late
     cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
   });
 
   describe("choosing another symbol", () => {
     it("opens its chart, asks for its history, and stops following the old one", () => {
       goLiveWith(3);
-      deliverHistory(0, 29920);
+      deliverOpenChart(0, 29920);
       cy.contains("tbody tr", "AAB").find("button").click();
       cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
       cy.then(() => expect(requests()).to.include("history 1"));
       cy.get(".chart-area .chart-overlay svg.skeleton").should("exist"); // a fresh chart, not the old one
-      deliverHistory(1, 31000);
+      deliverOpenChart(1, 31000);
       chartLabel().should("contain", "AAB").and("contain", "last 310.00");
     });
 
@@ -436,7 +449,7 @@ describe("NaivePage: the open chart", () => {
 
     it("stops following the symbol once closed", () => {
       goLiveWith(3);
-      deliverHistory(0);
+      deliverOpenChart(0);
       cy.contains("button", "Close chart").click();
       cy.then(() => socket().receive(makeDelta(6, [makeUpdate(0, { last: 40000 })])));
       cy.get("canvas.chart-canvas").should("not.exist");
@@ -458,6 +471,149 @@ describe("NaivePage: the open chart", () => {
       FakeWebSocket.latest.open(); // an open event again, as after a reconnect
     });
     cy.then(() => expect(requests().filter((request) => request === "history 0")).to.have.length(2));
+  });
+});
+
+describe("NaivePage: chart ranges", () => {
+  const range = (label: string) => cy.contains(".range-button", label).click();
+
+  it("opens on one day, and asks the server for that range of the open symbol once connected", () => {
+    goLiveWith(3);
+    cy.get('.range-button[aria-pressed="true"]').should("have.text", "1D");
+    cy.then(() => expect(rangeRequests()).to.deep.equal(["0 1d"]));
+  });
+
+  it("shows the chart's skeleton until the day arrives, then draws it and describes it as the last day", () => {
+    goLiveWith(3);
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+    deliverOpenChart(0, 29920);
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    chartLabel().should("contain", "over the last day").and("contain", "last 299.20");
+  });
+
+  it("does not draw the real five-minute history in the open chart, which now shows a day", () => {
+    goLiveWith(3);
+    deliverHistory(0, 29920); // the five-minute reply, still asked for as the watchlist's tracked chart
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+  });
+
+  it("asks for another range when it is chosen, shows a skeleton until it arrives, and says what the range is", () => {
+    goLiveWith(3);
+    deliverOpenChart(0, 29920);
+    range("1M");
+    cy.then(() => expect(rangeRequests()).to.deep.equal(["0 1d", "0 1m"]));
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+    deliverOpenChart(0, 30500, 31, "1m");
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    chartLabel().should("contain", "over the last month").and("contain", "last 305.00");
+    cy.get(".price-line-big .price-today").should("contain.text", "1 month");
+  });
+
+  it("measures a longer range against where it starts: the price line says how far it has moved over the range", () => {
+    goLiveWith(3);
+    range("1Y");
+    // 100 points rising by 10 a point: it started at 290.10 and is now at 300.00
+    cy.then(() => socket().receive({ ...makeHistory(0, 100, 30000), range: "1y" }));
+    cy.get(".price-line-big").should("have.attr", "data-direction", "1");
+    cy.get(".price-line-big .price-today").should("contain.text", "1 year");
+    cy.get(".price-line-big .price-move").should("contain.text", "+");
+  });
+
+  it("does not ask again for a range it already has, and shows it at once when it is chosen again", () => {
+    goLiveWith(3);
+    deliverOpenChart(0, 29920);
+    range("1M");
+    deliverOpenChart(0, 30500, 31, "1m");
+    range("1D");
+    range("1M");
+    cy.get("canvas.chart-canvas").should("have.attr", "data-ready", "true");
+    cy.then(() => expect(rangeRequests()).to.deep.equal(["0 1d", "0 1m"]));
+  });
+
+  it("follows the live price in the newest point of a longer chart", () => {
+    goLiveWith(3);
+    range("YTD");
+    deliverOpenChart(0, 29920, 40, "ytd");
+    chartLabel().should("contain", "last 299.20");
+    cy.then(() => socket().receive({ ...makeDelta(6, [makeUpdate(0, { last: 30500, ts: Date.now() + 5000 })]), ts: Date.now() }));
+    chartLabel().should("contain", "last 305.00").and("contain", "high 305.00");
+  });
+
+  it("ignores a longer chart for a symbol that is not open", () => {
+    goLiveWith(3);
+    cy.contains("tbody tr", "AAB").find("button").click();
+    cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
+    deliverOpenChart(0, 29920); // the day of AAA, arriving late
+    cy.get(".chart-area .chart-overlay svg.skeleton").should("exist");
+  });
+
+  it("asks for the same range of the next symbol when another is opened", () => {
+    goLiveWith(3);
+    range("1Y");
+    cy.contains("tbody tr", "AAB").find("button").click();
+    cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
+    cy.then(() => expect(rangeRequests()).to.deep.equal(["0 1d", "0 1y", "1 1y"]));
+    cy.get('.range-button[aria-pressed="true"]').should("have.text", "1Y");
+  });
+
+  it("keeps the order book while the range changes", () => {
+    goLiveWith(3);
+    cy.then(() => socket().receive(makeDepth(0)));
+    cy.get("table.book").should("exist");
+    range("1M");
+    cy.get("table.book").should("exist");
+  });
+
+  it("asks for the range again on a new connection", () => {
+    goLiveWith(3);
+    range("1M");
+    cy.then(() => FakeWebSocket.latest.open()); // an open event again, as after a reconnect
+    cy.then(() => expect(rangeRequests().filter((request) => request === "0 1m")).to.have.length(2));
+  });
+
+  it("says the longer histories are simulated", () => {
+    goLiveWith(3);
+    cy.get(".range-note").should("have.text", "Simulated history");
+  });
+});
+
+describe("NaivePage: the market clock of the chart and the trades", () => {
+  it("times the trades on the market's clock, and names it in the heading, once the open symbol's session arrives", () => {
+    goLiveWith(3);
+    cy.then(() => {
+      socket().receive(makeDepth(0));
+      socket().receive(makeTrades(0));
+    });
+    cy.get("table.tape thead th").first().should("have.text", "Time"); // not known yet: the browser's clock
+    deliverOpenChart(0, 29920, 60, "1d", newYork);
+    cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+  });
+
+  it("keeps the plain heading when no session arrives", () => {
+    goLiveWith(3);
+    cy.then(() => {
+      socket().receive(makeDepth(0));
+      socket().receive(makeTrades(0));
+    });
+    deliverOpenChart(0, 29920, 60, "1d");
+    cy.get("table.tape thead th").first().should("have.text", "Time");
+  });
+
+  it("forgets the session when another symbol is opened, so its trades are not timed on the old market's clock", () => {
+    goLiveWith(3);
+    cy.then(() => {
+      socket().receive(makeDepth(0));
+      socket().receive(makeTrades(0));
+    });
+    deliverOpenChart(0, 29920, 60, "1d", newYork);
+    cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+    cy.contains("tbody tr", "AAB").find("button").click();
+    cy.get("#symbol-detail-title").should("have.text", "AAB price chart");
+    cy.then(() => {
+      socket().receive(makeDepth(1));
+      socket().receive(makeTrades(1));
+    });
+    cy.get("table.tape thead th").first().should("have.text", "Time");
   });
 });
 
@@ -789,6 +945,22 @@ describe("NaivePage: the watchlist", () => {
       mountPage();
       cy.contains("summary", "Chaos controls").click();
       cy.get(".chaos-row button").first().should("be.disabled");
+    });
+  });
+
+  describe("the toolbar and the performance panel", () => {
+    it("puts the record button beside the watchlist toggle, both at the right-hand end", () => {
+      goLive();
+      cy.get(".toolbar-end").children().should("have.length", 2);
+      cy.get(".toolbar-end > :first-child").should("have.class", "record-button");
+      cy.get(".toolbar-end > :last-child").should("have.class", "watchlist-toggle");
+    });
+
+    it("has a performance panel that can be collapsed to its heading", () => {
+      goLive();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(true));
+      cy.contains("summary", "Performance").click();
+      cy.get(".hud-metrics").then(($el) => expect($el[0]!.checkVisibility()).to.equal(false));
     });
   });
 });

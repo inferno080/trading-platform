@@ -1,4 +1,4 @@
-import type { ChaosAction, DepthLevel, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, Trade } from "../protocol/messages";
+import type { ChaosAction, DepthLevel, HistoryRange, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, SessionInfo, Trade } from "../protocol/messages";
 
 /** Where the connection stands. */
 export type FeedStatus = "connecting" | "live" | "reconnecting" | "closed" | "error";
@@ -19,6 +19,10 @@ export interface FeedStats {
 /** The price chart of one tracked instrument (the open one, or one on the watchlist): the flat [time, price, ...] list, all of it, replacing what the page had. */
 export interface ChartUpdate {
   id: number;
+  /** Which range this chart is (the last five minutes when absent). */
+  range?: HistoryRange;
+  /** The instrument's market at the time (sent with the longer ranges): which session a day is, and its time zone. */
+  session?: SessionInfo;
   data: Float64Array;
 }
 
@@ -40,6 +44,7 @@ export type WorkerCommand =
   | { type: "connect"; url: string }
   | { type: "pull" } // "send me what changed since the last pull": the page asks once per animation frame
   | { type: "select"; id: number | null } // the instrument whose price chart the page shows (null: none)
+  | { type: "range"; range: HistoryRange } // how far back the open chart goes: the worker asks the server for that range of the open instrument
   | { type: "watch"; ids: number[] } // the instruments on the watchlist: each is subscribed to and has a chart kept up to date
   | { type: "rfq"; request: RfqRequest } // ask the dealer for a quote
   | { type: "rfqAccept"; ref: number } // accept a quote
@@ -61,3 +66,4 @@ export type WorkerEvent =
   | { type: "rfqQuote"; quote: RfqQuote } // the dealer's quote for a request
   | { type: "rfqResult"; result: RfqResult } // how a request ended
   | { type: "reconnect"; attempt: number; retryAt: number }; // the connection was lost: the next attempt is number `attempt`, made at time `retryAt` (ms, like Date.now())
+

@@ -321,3 +321,94 @@ describe("FeedStore: the open instrument's order book and trades", () => {
     expect(heard).to.equal(1);
   });
 });
+
+describe("FeedStore: charts over a range", () => {
+  const data = (...values: number[]) => Float64Array.from(values);
+
+  it("keeps the five-minute chart and a longer chart of the same instrument apart", () => {
+    const store = new FeedStore();
+    store.setCharts([{ id: 1, data: data(1000, 100) }]);
+    store.setCharts([{ id: 1, range: "1m", data: data(1000, 90, 2000, 95) }]);
+    expect(Array.from(store.chart(1)!)).to.deep.equal([1000, 100]);
+    expect(Array.from(store.chart(1, "5m")!)).to.deep.equal([1000, 100]);
+    expect(Array.from(store.chart(1, "1m")!)).to.deep.equal([1000, 90, 2000, 95]);
+  });
+
+  it("keeps each range apart, and replaces a range's chart when a newer one arrives", () => {
+    const store = new FeedStore();
+    store.setCharts([
+      { id: 1, range: "1m", data: data(1, 1) },
+      { id: 1, range: "1y", data: data(2, 2) },
+    ]);
+    store.setCharts([{ id: 1, range: "1m", data: data(3, 3) }]);
+    expect(Array.from(store.chart(1, "1m")!)).to.deep.equal([3, 3]);
+    expect(Array.from(store.chart(1, "1y")!)).to.deep.equal([2, 2]);
+  });
+
+  it("has no longer chart until one arrives, and no chart of a range for an instrument that was never given one", () => {
+    const store = new FeedStore();
+    store.setCharts([{ id: 1, range: "1m", data: data(1, 1) }]);
+    expect(store.chart(1, "1y")).to.equal(undefined);
+    expect(store.chart(2, "1m")).to.equal(undefined);
+    expect(store.chart(1)).to.equal(undefined); // the five-minute chart is separate
+  });
+
+  it("tells chart listeners which instrument changed, for a longer chart too", () => {
+    const store = new FeedStore();
+    const heard: number[][] = [];
+    store.subscribeCharts((ids) => heard.push(ids));
+    store.setCharts([{ id: 4, range: "max", data: data(1, 1) }]);
+    expect(heard).to.deep.equal([[4]]);
+  });
+
+  it("forgets the longer charts of instruments that are no longer tracked, and keeps those that are", () => {
+    const store = new FeedStore();
+    store.setCharts([
+      { id: 1, range: "1m", data: data(1, 1) },
+      { id: 2, range: "1m", data: data(2, 2) },
+      { id: 2, data: data(3, 3) },
+    ]);
+    store.keepCharts(new Set([2]));
+    expect(store.chart(1, "1m")).to.equal(undefined);
+    expect(store.chart(2, "1m")).not.to.equal(undefined);
+    expect(store.chart(2)).not.to.equal(undefined);
+  });
+});
+
+describe("FeedStore: the market session of the open symbol's charts", () => {
+  const session = { market: "us", timeZone: "America/New_York", continuous: false, open: 1_000, close: 2_000 } as const;
+  const data = Float64Array.of(1000, 1, 2000, 2);
+
+  it("has no session until a longer chart arrives with one", () => {
+    const store = new FeedStore();
+    expect(store.session(1)).to.equal(undefined);
+    store.setCharts([{ id: 1, data }]); // the five-minute chart has none
+    expect(store.session(1)).to.equal(undefined);
+  });
+
+  it("keeps the session that arrives with a longer chart, for that instrument", () => {
+    const store = new FeedStore();
+    store.setCharts([{ id: 1, range: "1d", session, data }]);
+    expect(store.session(1)).to.deep.equal(session);
+    expect(store.session(2)).to.equal(undefined);
+  });
+
+  it("replaces the session when a newer one arrives", () => {
+    const store = new FeedStore();
+    store.setCharts([{ id: 1, range: "1d", session, data }]);
+    store.setCharts([{ id: 1, range: "1m", session: { ...session, close: 3_000 }, data }]);
+    expect(store.session(1)?.close).to.equal(3_000);
+  });
+
+  it("forgets the session of an instrument that is no longer tracked, and keeps the others", () => {
+    const store = new FeedStore();
+    store.setCharts([
+      { id: 1, range: "1d", session, data },
+      { id: 2, range: "1d", session, data },
+    ]);
+    store.keepCharts(new Set([2]));
+    expect(store.session(1)).to.equal(undefined);
+    expect(store.session(2)).to.deep.equal(session);
+  });
+});
+

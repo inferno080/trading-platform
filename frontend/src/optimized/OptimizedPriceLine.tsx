@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useIntl } from "react-intl";
 import { priceSummary } from "../chart/price";
+import { baselineFor, LIVE_RANGE, type HistoryRange } from "../chart/range";
 import { PriceLine } from "../components/PriceLine";
 import type { FeedStore } from "./feedStore";
 
@@ -10,18 +11,19 @@ interface OptimizedPriceLineProps {
   decimals: number;
   prevClose: number;
   variant: "big" | "small";
-  /** The same refresh interval and Freeze as everything else on screen. */
+  /** How far back the change is measured (since the previous close when absent). */
+  range?: HistoryRange;
+  /** The same refresh interval as everything else on screen. */
   refreshMs: number;
-  frozen: boolean;
 }
 
 /**
  * The price and its move, read from the store. Only this tiny component re-renders, at most once per refresh interval
- * (every change at 0), and it holds still while frozen and catches up when unfrozen.
+ * (every change at 0).
  */
-export function OptimizedPriceLine({ store, id, decimals, prevClose, variant, refreshMs, frozen }: OptimizedPriceLineProps) {
+export function OptimizedPriceLine({ store, id, decimals, prevClose, variant, range = LIVE_RANGE, refreshMs }: OptimizedPriceLineProps) {
   const { locale } = useIntl();
-  const [data, setData] = useState(store.chart(id));
+  const [data, setData] = useState(store.chart(id, range));
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -29,20 +31,20 @@ export function OptimizedPriceLine({ store, id, decimals, prevClose, variant, re
     const show = () => {
       timer = undefined;
       shownAt = performance.now();
-      setData(store.chart(id));
+      setData(store.chart(id, range));
     };
     const soon = (delay: number) => {
       if (timer === undefined) timer = setTimeout(show, delay);
     };
     const unsubscribe = store.subscribeCharts((ids) => {
-      if (ids.includes(id) && !frozen) soon(refreshMs <= 0 ? 0 : Math.max(0, shownAt + refreshMs - performance.now()));
+      if (ids.includes(id)) soon(refreshMs <= 0 ? 0 : Math.max(0, shownAt + refreshMs - performance.now()));
     });
-    soon(0); // what is already there: when it first appears, and when it is unfrozen
+    soon(0); // what is already there, when it first appears
     return () => {
       unsubscribe();
       clearTimeout(timer);
     };
-  }, [store, id, refreshMs, frozen]);
+  }, [store, id, range, refreshMs]);
 
-  return <PriceLine summary={priceSummary(data, decimals, prevClose, locale)} variant={variant} />;
+  return <PriceLine summary={priceSummary(data, decimals, baselineFor(range, data, prevClose), locale)} variant={variant} range={range} />;
 }

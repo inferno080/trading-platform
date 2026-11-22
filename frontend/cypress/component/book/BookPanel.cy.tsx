@@ -199,4 +199,37 @@ describe("BookPanel", () => {
     cy.get("table.book thead th").first().should("have.text", "買い数量");
     cy.get("tr.tape-buy td").last().should("contain.text", "買い");
   });
+
+  describe("the clock the trades are timed on", () => {
+    const wednesday = Date.UTC(2026, 10, 18, 15, 0, 0); // 10:00:00 in New York in winter
+    const mountWithZone = (timeZone?: string) =>
+      cy.mount(withI18n(<BookPanel depth={ladder()} tape={[trade(0, "buy", { ts: wednesday })]} decimals={2} timeZone={timeZone} />));
+
+    it("times each trade on the market's clock, and says which clock in the heading, so it agrees with the chart", () => {
+      mountWithZone("America/New_York");
+      cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(E[SD]T\)$/);
+      cy.get("table.tape tbody tr").first().find("td").first().then(($cell) => {
+        expect($cell.text()).to.match(/^(10:00:00 AM|11:00:00 AM)$/); // 10 in winter, 11 in summer time
+      });
+    });
+
+    it("times the trades on another market's clock for another market", () => {
+      mountWithZone("Asia/Tokyo");
+      cy.get("table.tape tbody tr").first().find("td").first().should("have.text", "12:00:00 AM");
+      cy.get("table.tape thead th").first().invoke("text").should("match", /^Time \(.+\)$/);
+    });
+
+    it("keeps the plain heading, and the browser's clock, when there is no zone", () => {
+      mountWithZone();
+      cy.get("table.tape thead th").first().should("have.text", "Time");
+      cy.get("table.tape tbody tr").first().find("td").first().invoke("text").should("match", /^\d{1,2}:\d{2}:\d{2}/);
+    });
+
+    it("writes the heading in Japanese when the language is", () => {
+      localStorage.setItem("locale", "ja-JP");
+      mountWithZone("America/New_York");
+      cy.get("table.tape thead th").first().invoke("text").should("match", /^時刻（.+）$/);
+    });
+  });
 });
+

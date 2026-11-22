@@ -12,7 +12,7 @@ const readyStore = () => {
   return store;
 };
 const mountGrid = (store = readyStore()) => {
-  cy.mount(withI18n(<QuotesGrid store={store} frozen={false} refreshMs={0} />));
+  cy.mount(withI18n(<QuotesGrid store={store} refreshMs={0} />));
   cy.get(".ag-row[row-id]").should("have.length", store.rows.length); // the grid is ready and listening
   return store;
 };
@@ -235,7 +235,7 @@ describe("QuotesGrid", () => {
 
   it("starts from the store's current rows, even when it changed before the grid was ready", () => {
     const store = readyStore();
-    cy.mount(withI18n(<QuotesGrid store={store} frozen={false} refreshMs={0} />));
+    cy.mount(withI18n(<QuotesGrid store={store} refreshMs={0} />));
     store.applyBatch([makeQuote(0, { last: 31000 })], Date.now()); // announced before the grid can listen
     cell(0, "last").should("contain.text", "310.00");
   });
@@ -244,7 +244,7 @@ describe("QuotesGrid", () => {
     const INTERVAL = 400;
     const mountSlow = () => {
       const store = readyStore();
-      cy.mount(withI18n(<QuotesGrid store={store} frozen={false} refreshMs={INTERVAL} />));
+      cy.mount(withI18n(<QuotesGrid store={store} refreshMs={INTERVAL} />));
       cy.get(".ag-row[row-id]").should("have.length", 3);
       return store;
     };
@@ -288,43 +288,6 @@ describe("QuotesGrid", () => {
     });
   });
 
-  describe("when frozen", () => {
-    // The page toggles freezing on a grid that is already showing, so the tests do the same.
-    function Harness({ store }: { store: FeedStore }) {
-      const [frozen, setFrozen] = useState(false);
-      return (
-        <>
-          <button onClick={() => setFrozen((f) => !f)}>toggle freeze</button>
-          <QuotesGrid store={store} frozen={frozen} refreshMs={0} />
-        </>
-      );
-    }
-    const mountHarness = () => {
-      const store = readyStore();
-      cy.mount(withI18n(<Harness store={store} />));
-      cy.get(".ag-row[row-id]").should("have.length", 3);
-      return store;
-    };
-
-    it("holds the numbers still while the store keeps receiving, and catches up when resumed", () => {
-      const store = mountHarness();
-      cy.contains("button", "toggle freeze").click();
-      cy.then(() => store.applyBatch([makeQuote(0, { last: 31000 })], Date.now()));
-      cy.then(() => expect(store.rows[0]?.last).to.be.closeTo(310, 1e-9)); // the store has it
-      cell(0, "last").should("have.text", "299.20"); // the grid does not
-      cy.contains("button", "toggle freeze").click();
-      cell(0, "last").should("contain.text", "310.00");
-    });
-
-    it("draws live changes again after being resumed", () => {
-      const store = mountHarness();
-      cy.contains("button", "toggle freeze").click();
-      cy.contains("button", "toggle freeze").click();
-      cy.then(() => store.applyBatch([makeQuote(1, { last: 30500 })], Date.now()));
-      cell(1, "last").should("contain.text", "305.00");
-    });
-  });
-
   it("uses the Japanese words for the grid's own text in the Japanese locale", () => {
     localStorage.setItem("locale", "ja-JP");
     mountGrid();
@@ -335,7 +298,7 @@ describe("QuotesGrid", () => {
     const mountSelectable = (selectedId: number | null = null) => {
       const onSelect = cy.stub().as("select");
       const store = readyStore();
-      cy.mount(withI18n(<QuotesGrid store={store} frozen={false} refreshMs={0} selectedId={selectedId} onSelect={onSelect} />));
+      cy.mount(withI18n(<QuotesGrid store={store} refreshMs={0} selectedId={selectedId} onSelect={onSelect} />));
       cy.get(".ag-row[row-id]").should("have.length", 3);
       return store;
     };
@@ -366,7 +329,7 @@ describe("QuotesGrid", () => {
         return (
           <>
             <button onClick={() => setId(2)}>choose 2</button>
-            <QuotesGrid store={readyStoreOnce} frozen={false} refreshMs={0} selectedId={id} onSelect={setId} />
+            <QuotesGrid store={readyStoreOnce} refreshMs={0} selectedId={id} onSelect={setId} />
           </>
         );
       }

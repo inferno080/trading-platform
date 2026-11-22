@@ -6,8 +6,8 @@ import type { ChaosAction } from "../protocol/messages";
 export const BURST = { min: 1, max: 60, start: 5 };
 export const LATENCY = { min: 0, max: 5000, start: 500 };
 
-/** The unit of the number some faults take, shown in what was sent. */
-const UNITS: Partial<Record<ChaosAction, string>> = { burst: "s", latency: "ms" };
+/** The message that says what was sent, by whether the fault takes a number (and in what unit). Each is one whole message, so each language orders and punctuates it its own way. */
+const SENT_MESSAGE: Partial<Record<ChaosAction, "chaos.sent.seconds" | "chaos.sent.ms">> = { burst: "chaos.sent.seconds", latency: "chaos.sent.ms" };
 
 interface Limits {
   min: number;
@@ -87,9 +87,9 @@ export function ChaosPanel({ connected, onSend }: ChaosPanelProps) {
 
   const send = (action: ChaosAction, value?: number) => {
     onSend(action, value);
-    const unit = UNITS[action];
-    const detail = unit ? ` (${value} ${unit})` : "";
-    setSent(t("chaos.sent", { what: t(`chaos.${action}.label`) + detail }));
+    const what = t(`chaos.${action}.label`);
+    const message = SENT_MESSAGE[action];
+    setSent(message ? t(message, { what, value: value ?? 0 }) : t("chaos.sent.plain", { what }));
   };
 
   return (

@@ -2,6 +2,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { config } from "../config.js";
 import { MarketSimulator } from "../sim/marketSimulator.js";
 import { History } from "../sim/history.js";
+import { rangeSeries } from "../sim/rangeHistory.js";
+import { sessionAt } from "../sim/sessions.js";
 import { decodeClientMessage, encodeMessage } from "../protocol/codec.js";
 import { Chaos } from "./chaos.js";
 import { startTicker } from "./ticker.js";
@@ -10,6 +12,7 @@ import { Subscriptions } from "./subscriptions.js";
 import {
   PROTOCOL_VERSION,
   type Delta,
+  type HistoryRange,
   type Rejected,
   type Session,
   type Snapshot,
@@ -110,12 +113,20 @@ const handleUnsubscribe = (ws: WebSocket, id: number): void => {
   if (subs.unsubscribe(ws, id) && !subs.isWatched(id)) sim.unwatch(id);
 };
 
-const handleHistory = (ws: WebSocket, id: number): void => {
+const handleHistory = (ws: WebSocket, id: number, range: HistoryRange = "5m"): void => {
   if (id < 0 || id >= sim.size) {
     sendReply(ws, rejectedFrame("history", id, "unknown-instrument"));
     return;
   }
-  sendReply(ws, encodeMessage({ t: "history", id, points: history.points(id) }));
+  if (range === "5m") {
+    sendReply(ws, encodeMessage({ t: "history", id, range, points: history.points(id) })); // the real buffer
+    return;
+  }
+  // A longer range is made up when asked: nothing is stored.
+  const now = Date.now();
+  const session = sessionAt(sim.marketOf(id), now);
+  const points = rangeSeries({ id, range, now, last: sim.lastPrice(id), prevClose: sim.prevClose(id), tick: sim.screen(id)!.tick, session });
+  sendReply(ws, encodeMessage({ t: "history", id, range, session, points }));
 };
 
 // Abruptly ends every client connection, like a network failure. Returns how many there were.
@@ -152,7 +163,7 @@ wss.on("connection", (ws) => {
         handleUnsubscribe(ws, msg.id);
         break;
       case "history":
-        handleHistory(ws, msg.id);
+        handleHistory(ws, msg.id, msg.range);
         break;
       case "rfq":
         desk.request(ws, msg);
@@ -219,7 +230,7 @@ startTicker(config.tickMs, () => {
   const frame = encodeMessage(delta);
   // The depth and trades of this tick travel with the delta: held back by latency, and lost with it by a gap.
   const deliver = (): void => {
-    broadcast(frame, updateCount);
+    broadcast(frame, delta.updates.length);
     for (const { id, frame: extraFrame } of extra) for (const ws of subs.watchers(id)) sendStreamFrame(ws, extraFrame);
   };
   const delay = chaos.deliveryDelay(now);

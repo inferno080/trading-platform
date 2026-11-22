@@ -109,11 +109,35 @@ export interface Trades {
   trades: Trade[];
 }
 
-/** Recent price history of one instrument, oldest first: [epoch ms, last price as a wire integer], one point per interval. */
+/**
+ * How far back a price history goes: "5m" is the last five minutes (the real buffer, one point a second); the others are
+ * made up when asked, ending at the current price: "1d" the last 24 hours (5-minute bars, starting at the previous close),
+ * "1m" the last month and "1y" the last year (daily bars), "ytd" since 1 January (daily), and "max" since the instrument
+ * "started trading" (weekly bars), a date that is different for each instrument.
+ */
+export const HISTORY_RANGES = ["5m", "1d", "1m", "1y", "ytd", "max"] as const;
+export type HistoryRange = (typeof HISTORY_RANGES)[number];
+
+/** Price history of one instrument, oldest first: [epoch ms, last price as a wire integer]. `range` says which range this is. */
 export interface HistoryData {
   t: "history";
   id: number;
+  range: HistoryRange;
+  /** The instrument's market at the time (not sent for the five-minute range): for a day, the session the series is of. */
+  session?: SessionInfo;
   points: [ts: number, price: number][];
+}
+
+/** The markets instruments trade on: US, European and Japanese equities, and round-the-clock FX. */
+export type Market = "us" | "eu" | "jp" | "fx";
+
+/** One market's session at some moment: all times are epoch ms, and the session is the open one, or else the last that ended. */
+export interface SessionInfo {
+  market: Market;
+  timeZone: string; // IANA name, such as "America/New_York"
+  continuous: boolean; // trades round the clock, so there is no open or close (the session is the last 24 hours)
+  open: number;
+  close: number;
 }
 
 /** Why a request was refused. */
@@ -209,10 +233,11 @@ export interface UnsubscribeRequest {
   id: number;
 }
 
-/** Asks once for the recent price history of one instrument. Answered with HistoryData, to this client only. */
+/** Asks once for the price history of one instrument (the last five minutes unless `range` says otherwise). Answered with HistoryData, to this client only. */
 export interface HistoryRequest {
   t: "history";
   id: number;
+  range?: HistoryRange;
 }
 
 /** Asks the dealer for a price for a size (a request for quote, RFQ). Answered with an RfqQuote, or an RfqResult if declined. */

@@ -42,7 +42,7 @@ describe("ConnectionStatus", () => {
   it("is in Japanese when the language is", () => {
     localStorage.setItem("locale", "ja-JP");
     cy.mount(withI18n(<ConnectionStatus status="reconnecting" reconnect={{ attempt: 2, retryAt: Date.now() + 3000 }} onRetry={cy.stub()} />));
-    cy.get(".status").should("have.text", "再接続中 (2回目)");
+    cy.get(".status").should("have.text", "再接続中（2回目）");
     cy.contains("button", "今すぐ再試行").should("exist");
   });
 });

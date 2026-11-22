@@ -1,4 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { RangeSelector } from "./RangeSelector";
+import type { HistoryRange } from "./range";
 import { useIntl } from "react-intl";
 import { Icon } from "../components/Icon";
 import { useT } from "../i18n/useT";
@@ -27,6 +29,9 @@ interface SymbolDetailProps {
   price: ReactNode;
   /** The button that opens the ticket for asking a dealer for a quote, beside the watchlist button. */
   ticket: ReactNode;
+  /** Which range the chart shows, and how it is changed. */
+  range: HistoryRange;
+  onRangeChange: (range: HistoryRange) => void;
 }
 
 /**
@@ -34,7 +39,7 @@ interface SymbolDetailProps {
  * same. Focus moves to its heading when it opens (so a keyboard or screen reader user lands in it) and goes back to
  * where it was when it closes; Escape closes it.
  */
-export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWatchlist, onToggleWatchlist, onClose, takeFocus, children, side, price, ticket }: SymbolDetailProps) {
+export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWatchlist, onToggleWatchlist, onClose, takeFocus, children, side, price, ticket, range, onRangeChange }: SymbolDetailProps) {
   const t = useT();
   const { locale } = useIntl();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -76,7 +81,10 @@ export function SymbolDetail({ symbol, name, currency, tickSize, decimals, inWat
       </div>
       <div className="symbol-detail-price">{price}</div>
       <div className="symbol-detail-body">
-        <div className="symbol-detail-chart">{children}</div>
+        <div className="symbol-detail-chart">
+          {children}
+          <RangeSelector range={range} onChange={onRangeChange} />
+        </div>
         <div className="symbol-detail-side">{side}</div>
       </div>
     </section>

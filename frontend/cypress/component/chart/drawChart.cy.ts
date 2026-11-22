@@ -18,6 +18,20 @@ const view = (overrides: Partial<ChartView> = {}): ChartView => ({
 });
 const rising = series(60, (i) => 30000 + i * 10);
 
+/** The words a chart writes, in order, by listening to the canvas as it draws them. */
+const textsOf = (data: number[], overrides: Partial<ChartView> = {}) => {
+  const { context } = makeCanvas(400, 200);
+  const texts: string[] = [];
+  const fillText = context.fillText.bind(context);
+  context.fillText = (text: string, x: number, y: number) => {
+    texts.push(text);
+    fillText(text, x, y);
+  };
+  drawChart(context, data, view(overrides), TEST_COLORS);
+  return texts;
+};
+
+
 describe("nearestIndex", () => {
   const data = [0, 1, 1000, 2, 2000, 3, 3000, 4]; // four points one second apart
 
@@ -218,5 +232,85 @@ describe("readChartColors", () => {
     for (const key of ["grid", "text", "muted", "background", "down"] as const) expect(colors[key], key).to.be.a("string");
     document.documentElement.style.removeProperty("--color-accent");
     document.documentElement.style.removeProperty("--color-up");
+  });
+});
+
+describe("drawChart: ranges", () => {
+  const DAY = 86_400_000;
+  const oneYear = series(60, (i) => 30000 + i * 10).map((value, i) => (i % 2 === 0 ? Date.UTC(2026, 0, 1) + (i / 2) * 6 * DAY : value));
+
+  it("writes the time axis as times for the five-minute range, and as dates for a longer one", () => {
+    const fiveMinutes = textsOf(rising, { range: "5m" });
+    const year = textsOf(oneYear, { range: "1y" });
+    expect(fiveMinutes.filter((text) => /^\d{2}:\d{2}:\d{2}/.test(text))).to.have.length(4);
+    expect(year.filter((text) => /^[A-Z][a-z]{2} 20\d\d$/.test(text))).to.have.length(4);
+  });
+
+  it("writes the axis dates in the language's own style", () => {
+    expect(textsOf(oneYear, { range: "1y", locale: "en-GB" }).some((text) => /^[A-Z][a-z]{2} 2026$/.test(text))).to.equal(true);
+    expect(textsOf(oneYear, { range: "1y", locale: "ja-JP" }).some((text) => /^2026年\d{1,2}月$/.test(text))).to.equal(true);
+  });
+
+  it("writes only years on the longest range", () => {
+    const max = textsOf(oneYear, { range: "max" });
+    expect(max.filter((text) => /^20\d\d$/.test(text)).length).to.be.greaterThan(1);
+  });
+
+  it("draws the dotted line with the words it is given, at the baseline", () => {
+    const texts = textsOf(oneYear, { range: "1m", prevClose: 30200, prevCloseLabel: "Start" });
+    expect(texts.some((text) => text.startsWith("Start 302.00"))).to.equal(true);
+  });
+
+  it("treats a missing range as the five-minute range", () => {
+    expect(textsOf(rising)).to.deep.equal(textsOf(rising, { range: "5m" }));
+  });
+
+  it("colours a longer chart by its own start, not by the previous close", () => {
+    const { canvas, context } = makeCanvas(400, 200);
+    drawChart(context, rising, view({ range: "1m", prevClose: rising[1]! }), TEST_COLORS); // the baseline passed is where it starts: up
+    expect(countColor(canvas, GREEN)).to.be.greaterThan(100);
+    const down = makeCanvas(400, 200);
+    drawChart(down.context, rising, view({ range: "1m", prevClose: 99_999 }), TEST_COLORS); // a baseline above the end: down
+    expect(countColor(down.canvas, MAGENTA)).to.be.greaterThan(100);
+  });
+});
+
+describe("drawChart: a session's time axis", () => {
+  const open = Date.UTC(2026, 10, 18, 14, 30); // 9:30 AM in New York
+  const close = Date.UTC(2026, 10, 18, 21, 0); // 4:00 PM
+  // Three hours of data from the open, one point every 5 minutes: the day is still going, so the line stops partway.
+  const partway = series(37, (i) => 30000 + i * 5).map((value, i) => (i % 2 === 0 ? open + (i / 2) * 5 * 60_000 : value));
+
+  it("labels the axis from the open to the close on the market's clock, even though the data stops before the close", () => {
+    const texts = textsOf(partway, { range: "1d", timeZone: "America/New_York", domain: { start: open, end: close } });
+    const axis = texts.filter((text) => /^[A-Z][a-z]{2} \d{2}:\d{2} [AP]M$/.test(text));
+    expect(axis).to.have.length(4);
+    expect(axis[0]).to.equal("Wed 09:30 AM");
+    expect(axis[3]).to.equal("Wed 04:00 PM");
+  });
+
+  it("stops the line where the data stops, leaving the right of the chart empty, when the axis reaches further", () => {
+    const withDomain = makeCanvas(400, 200);
+    drawChart(withDomain.context, partway, view({ range: "1d", domain: { start: open, end: close } }), TEST_COLORS);
+    const right = withDomain.context.getImageData(300, 14, 80, 160).data; // the stretch of plot well past 3 hours into 6.5
+    let ink = 0;
+    for (let i = 3; i < right.length; i += 4) if (right[i]! > 200) ink++;
+    expect(countColor(withDomain.canvas, GREEN), "there is a line").to.be.greaterThan(50);
+    expect(ink, "but nothing drawn far to the right except the grid").to.be.lessThan(80 * 12); // only the grid's thin lines, no line chart
+  });
+
+  it("fills the whole width with the data when there is no domain, as before", () => {
+    const { canvas, context } = makeCanvas(400, 200);
+    drawChart(context, partway, view({ range: "1d" }), TEST_COLORS);
+    const right = context.getImageData(330, 14, 56, 160).data;
+    let green = 0;
+    for (let i = 0; i < right.length; i += 4) if (right[i + 1]! > 200 && right[i]! < 80) green++;
+    expect(countColor(canvas, GREEN)).to.be.greaterThan(50);
+    expect(green, "the line reaches the right edge").to.be.greaterThan(0);
+  });
+
+  it("writes the hover label on the market's clock, naming the zone", () => {
+    const texts = textsOf(partway, { range: "1d", timeZone: "America/New_York", domain: { start: open, end: close }, hoverX: 100 });
+    expect(texts.some((text) => /^Nov \d{1,2}, \d{2}:\d{2} [AP]M E[SD]T\s/.test(text))).to.equal(true);
   });
 });

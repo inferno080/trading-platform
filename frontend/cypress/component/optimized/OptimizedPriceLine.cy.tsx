@@ -8,9 +8,9 @@ const ID = 1;
 const chart = (last: number) => Float64Array.from(series(20, (i) => last - (19 - i) * 5));
 const send = (store: FeedStore, last: number, id = ID) => store.setCharts([{ id, data: chart(last) }]);
 
-const lineElement = (store: FeedStore, options: { refreshMs?: number; frozen?: boolean; variant?: "big" | "small" } = {}) =>
-  withI18n(<OptimizedPriceLine store={store} id={ID} decimals={2} prevClose={29800} variant={options.variant ?? "big"} refreshMs={options.refreshMs ?? 0} frozen={options.frozen ?? false} />);
-const mountLine = (store = new FeedStore(), options: { refreshMs?: number; frozen?: boolean; variant?: "big" | "small" } = {}) => {
+const lineElement = (store: FeedStore, options: { refreshMs?: number; variant?: "big" | "small" } = {}) =>
+  withI18n(<OptimizedPriceLine store={store} id={ID} decimals={2} prevClose={29800} variant={options.variant ?? "big"} refreshMs={options.refreshMs ?? 0} />);
+const mountLine = (store = new FeedStore(), options: { refreshMs?: number; variant?: "big" | "small" } = {}) => {
   cy.mount(lineElement(store, options));
   return store;
 };
@@ -68,21 +68,6 @@ describe("OptimizedPriceLine", () => {
       afterFrames(20);
       cy.get(".price-now").should("have.text", "299.20"); // not yet
       cy.get(".price-now", { timeout: 5000 }).should("have.text", "301.00");
-    });
-  });
-
-  describe("when frozen", () => {
-    it("holds still, and catches up when unfrozen", () => {
-      const store = mountLine();
-      cy.then(() => send(store, 29920));
-      cy.get(".price-now").should("have.text", "299.20");
-      cy.mount(lineElement(store, { frozen: true }));
-      afterFrames(5); // let it take what is already there before the change
-      cy.then(() => send(store, 30100));
-      afterFrames(15);
-      cy.get(".price-now").should("have.text", "299.20");
-      cy.mount(lineElement(store, { frozen: false }));
-      cy.get(".price-now").should("have.text", "301.00");
     });
   });
 

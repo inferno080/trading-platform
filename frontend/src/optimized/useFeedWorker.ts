@@ -3,6 +3,7 @@ import { useWorkerFactory } from "../feed/FeedWorkerContext";
 import type { FeedStatus, WorkerEvent } from "../feed/messages";
 import type { WorkerLike } from "../feed/FeedWorkerContext";
 import { WS_URL } from "../feed/url";
+import { LIVE_RANGE, type HistoryRange } from "../chart/range";
 import type { ReconnectInfo } from "../feed/reconnect";
 import { collector } from "../hud/collector";
 import type { ChaosAction, Session } from "../protocol/messages";
@@ -75,6 +76,13 @@ export function reduceWorkerEvent(state: FeedWorkerState, event: WorkerEvent): F
   }
 }
 
+/** What goes to the ticket (the dealer's replies, a lost connection), apart from the store and the page's state. */
+function forwardMessage(message: WorkerEvent, bridge: RfqBridge): void {
+  if (message.type === "rfqQuote") bridge.emit({ type: "quote", quote: message.quote });
+  else if (message.type === "rfqResult") bridge.emit({ type: "result", result: message.result });
+  else if (message.type === "status" && message.status !== "live" && message.status !== "connecting") bridge.emit({ type: "disconnected" });
+}
+
 const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
 
 /** How often rows that have gone quiet are marked as stale. */
@@ -101,7 +109,14 @@ export const RESUME_GRACE_MS = 1_000;
 export function useFeedWorker(
   selectedId: number | null = null,
   watchlist: number[] = NO_IDS,
-): { state: FeedWorkerState; store: FeedStore; rfq: RfqPort; retry: () => void; chaos: (action: ChaosAction, value?: number) => void } {
+  range: HistoryRange = LIVE_RANGE,
+): {
+  state: FeedWorkerState;
+  store: FeedStore;
+  rfq: RfqPort;
+  retry: () => void;
+  chaos: (action: ChaosAction, value?: number) => void;
+} {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
   const [store] = useState(() => new FeedStore());
@@ -117,6 +132,7 @@ export function useFeedWorker(
   );
   const selected = useRef(selectedId); // what a worker started later should be told
   const watched = useRef(watchlist);
+  const chosenRange = useRef(range);
 
   useEffect(() => {
     collector.reset(); // start clean: counters from a previously active tab must not leak in
@@ -128,9 +144,7 @@ export function useFeedWorker(
 
     connection.onmessage = (event) => {
       const message = event.data;
-      if (message.type === "rfqQuote") bridge.emit({ type: "quote", quote: message.quote });
-      else if (message.type === "rfqResult") bridge.emit({ type: "result", result: message.result });
-      else if (message.type === "status" && message.status !== "live" && message.status !== "connecting") bridge.emit({ type: "disconnected" });
+      forwardMessage(message, bridge);
       if (message.type === "reference") store.setReference(message.instruments, Date.now());
       else if (message.type === "snapshot") store.setSnapshot(message.quotes, Date.now());
       else if (message.type === "batch") {
@@ -146,6 +160,7 @@ export function useFeedWorker(
     connection.postMessage({ type: "connect", url: WS_URL });
     if (selected.current !== null) connection.postMessage({ type: "select", id: selected.current });
     if (watched.current.length > 0) connection.postMessage({ type: "watch", ids: watched.current });
+    if (chosenRange.current !== LIVE_RANGE) connection.postMessage({ type: "range", range: chosenRange.current });
 
     let frame = requestAnimationFrame(function onFrame() {
       const now = Date.now();
@@ -185,6 +200,10 @@ export function useFeedWorker(
     store.clearBook(); // the old instrument's order book and trades are not the new one's
     worker.current?.postMessage({ type: "select", id: selectedId });
   }, [selectedId, store]);
+  useEffect(() => {
+    chosenRange.current = range;
+    worker.current?.postMessage({ type: "range", range });
+  }, [range]);
   useEffect(() => {
     watched.current = watchlist;
     worker.current?.postMessage({ type: "watch", ids: watchlist });

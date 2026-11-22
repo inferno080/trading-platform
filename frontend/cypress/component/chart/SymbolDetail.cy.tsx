@@ -24,6 +24,8 @@ const detail = (overrides: Overrides = {}, handlers: { onClose?: () => void; onT
     side={<p id="side">the book and trades</p>}
     price={<p id="price">912.76</p>}
     ticket={<button id="ticket">Request a quote</button>}
+    range="1d"
+    onRangeChange={cy.stub().as("range")}
   >
     <p id="chart">the chart</p>
   </SymbolDetail>
@@ -206,4 +208,24 @@ describe("SymbolDetail", () => {
       expect(labels).to.deep.equal(["Add to watchlist", "Request a quote", "Close chart"]);
     });
   });
+
+  describe("the range buttons", () => {
+    it("sit below the chart, inside the chart's column", () => {
+      cy.mount(withI18n(detail()));
+      cy.get(".symbol-detail-chart .range-bar").should("exist");
+      cy.get("#chart").then(($chart) => {
+        cy.get(".range-bar").then(($bar) => {
+          expect($bar[0]!.getBoundingClientRect().top).to.be.at.least($chart[0]!.getBoundingClientRect().bottom - 1);
+        });
+      });
+    });
+
+    it("show the range it is given, and tell the page when another is chosen", () => {
+      cy.mount(withI18n(detail()));
+      cy.get('.range-button[aria-pressed="true"]').should("have.text", "1D");
+      cy.contains(".range-button", "1Y").click();
+      cy.get("@range").should("have.been.calledWith", "1y");
+    });
+  });
 });
+

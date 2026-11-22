@@ -226,21 +226,25 @@ main:focus {
 
 /* HUD */
 .hud {
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3); /* the same as the chaos controls: both are collapsible panels */
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
-.hud-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  margin-block-end: var(--space-3);
+/* The two collapsible panels (performance and chaos controls) look the same: same padding, same heading, same arrow. */
+.hud summary,
+.chaos summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.875rem;
 }
-.hud-header h2 {
-  font-size: 0.9375rem;
-  margin-inline-end: auto;
+.hud summary h2 {
+  display: inline;
+  margin: 0;
+  font: inherit;
+}
+.hud details[open] > summary {
+  margin-block-end: var(--space-3);
 }
 .hud-metrics {
   display: grid;
@@ -262,6 +266,9 @@ main:focus {
   margin: var(--space-3) 0 0;
   font-size: 0.8125rem;
   color: var(--color-text-muted);
+}
+.hud-note:empty {
+  margin: 0; /* the saved-run note is always in the page (it is announced), so when empty it must take no room */
 }
 .hud-warning {
   color: var(--color-stale);
@@ -295,18 +302,12 @@ main:focus {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
-.refresh-hint {
-  color: var(--color-text-muted);
-}
-.frozen-note {
-  font-size: 0.875rem;
-  color: var(--color-stale);
-}
-/* The freeze toggle shows its state with a filled style, not by color alone (it is also announced as pressed). */
-.toggle-button[aria-pressed="true"] {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  border-color: var(--color-accent);
+/* The record button and the watchlist toggle sit together at the right-hand end of the toolbar. */
+.toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
 }
 
 /* Quotes grid (AG Grid takes its colors from the design tokens; see QuotesGrid.tsx) */
@@ -950,11 +951,6 @@ tbody tr {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
-.chaos summary {
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.875rem;
-}
 .chaos-note {
   margin: var(--space-2) 0 0;
   font-size: 0.8125rem;
@@ -1016,4 +1012,50 @@ tbody tr {
   .chaos-row > button:first-child:only-of-type + .chaos-help {
     grid-column: auto;
   }
+}
+
+/* The range buttons above the chart (see chart/RangeSelector.tsx) */
+.range-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-start: var(--space-2);
+}
+.range-buttons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* Flat text buttons: muted until hovered, and the chosen one sits on a soft, neutral pill (no accent colour). */
+.range-button {
+  min-width: 3.25rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border-color: transparent;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.range-button:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  border-color: transparent;
+}
+/* The chosen range (it is also announced as pressed). */
+.range-button[aria-pressed="true"] {
+  color: var(--color-text);
+  font-weight: 600;
+  background: var(--color-surface-strong);
+  border-color: transparent;
+}
+/* The keyboard still gets a visible ring (WCAG 2.4.7), in the text colour instead of the accent blue; a click leaves none. */
+.range-button:focus-visible {
+  outline-color: var(--color-text);
+}
+.range-button:focus:not(:focus-visible) {
+  outline: none;
+}
+.range-note {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
 }

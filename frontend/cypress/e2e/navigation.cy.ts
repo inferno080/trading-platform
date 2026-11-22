@@ -79,17 +79,23 @@ describe("navigation and keyboard use", () => {
     cy.realPress("Tab");
     cy.focused().should("have.attr", "role", "tab").and("have.id", "tab-naive"); // only the selected tab is in the Tab order
     cy.realPress("Tab");
+    cy.focused().should("have.class", "record-button"); // the end of the toolbar: record, then the watchlist toggle
+    cy.realPress("Tab");
     cy.focused().should("have.class", "watchlist-toggle");
     cy.realPress("Tab");
-    cy.focused().should("have.class", "record-button");
+    cy.focused().should("match", "summary").and("contain.text", "Performance"); // the performance panel, a disclosure
     cy.realPress("Tab");
-    cy.focused().should("match", "summary"); // the chaos controls, a disclosure
+    cy.focused().should("match", "summary").and("contain.text", "Chaos controls"); // the chaos controls, another
     cy.realPress("Tab");
     cy.focused().should("have.class", "symbol-detail-watch"); // the open chart's buttons
     cy.realPress("Tab");
     cy.focused().should("have.class", "rfq-open");
     cy.realPress("Tab");
     cy.focused().should("have.class", "symbol-detail-close");
+    for (let i = 0; i < 5; i++) {
+      cy.realPress("Tab");
+      cy.focused().should("have.class", "range-button"); // the five range buttons below the chart
+    }
     cy.realPress("Tab");
     cy.focused().should("have.class", "table-wrap"); // the scrollable table can be reached and scrolled by keyboard
   });

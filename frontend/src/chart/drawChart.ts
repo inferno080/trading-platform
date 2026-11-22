@@ -1,4 +1,5 @@
-import { decimalFormatter, timeFormatter } from "../lib/format";
+import { decimalFormatter, rangeTimeFormatter } from "../lib/format";
+import type { HistoryRange } from "../protocol/messages";
 import { isUp } from "./price";
 
 /** The colors a chart is drawn in, read from the design tokens so it follows the theme. */
@@ -19,8 +20,14 @@ export interface ChartView {
   decimals: number; // of the instrument, for the price labels
   locale: string;
   hoverX: number | null; // pointer position in CSS pixels across the canvas, or null when it is not over it
-  prevClose: number; // the previous close as a wire integer, which decides the line's color and where the dotted line goes (0: not known)
-  prevCloseLabel: string; // the words beside the dotted line, such as "Prev close"
+  /** Which range the data covers, which decides how the time axis and the hover label are written (the last five minutes when absent). */
+  range?: HistoryRange;
+  /** The market's time zone, so times and dates are written on its clock (the browser's when absent). */
+  timeZone?: string;
+  /** The span the time axis covers, when it is longer than the data (a session whose close has not come yet); the data's own span when absent. */
+  domain?: { start: number; end: number };
+  prevClose: number; // the price the line is measured against (the previous close, or the start of a longer range) as a wire integer: it decides the line's color and where the dotted line goes (0: not known)
+  prevCloseLabel: string; // the words beside the dotted line, such as "Prev close" or "Start"
 }
 
 const PAD = { left: 68, right: 14, top: 14, bottom: 26 };
@@ -111,7 +118,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, plot: Plot, view: ChartView, co
     ctx.fillText(price.format(value / scale), plot.left - 8, y);
   }
   ctx.textBaseline = "top";
-  const time = timeFormatter(view.locale);
+  const time = rangeTimeFormatter(view.locale, view.range ?? "5m", "axis", view.timeZone);
   for (let i = 0; i < TIME_LABELS; i++) {
     const at = plot.start + (i * (plot.end - plot.start)) / (TIME_LABELS - 1);
     ctx.textAlign = alignFor(i);
@@ -182,7 +189,7 @@ function drawHover(ctx: CanvasRenderingContext2D, plot: Plot, data: ArrayLike<nu
   ctx.arc(x, y, 4, 0, Math.PI * 2);
   ctx.fill();
 
-  const label = `${timeFormatter(view.locale).format(time)}  ${decimalFormatter(view.locale, view.decimals).format(price / 10 ** view.decimals)}`;
+  const label = `${rangeTimeFormatter(view.locale, view.range ?? "5m", "hover", view.timeZone).format(time)}  ${decimalFormatter(view.locale, view.decimals).format(price / 10 ** view.decimals)}`;
   const boxWidth = ctx.measureText(label).width + 16;
   const boxX = x + 10 + boxWidth > plot.left + plot.width ? x - 10 - boxWidth : x + 10; // flip to the left near the right edge
   ctx.fillStyle = colors.background;
@@ -207,7 +214,7 @@ export function drawChart(ctx: CanvasRenderingContext2D, data: ArrayLike<number>
   const height = view.height - PAD.top - PAD.bottom;
   if (data.length < 4 || width <= 0 || height <= 0) return; // fewer than two points is not a line
   const [low, high] = priceRange(data, view.prevClose);
-  const plot: Plot = { left: PAD.left, top: PAD.top, width, height, low, high, start: data[0]!, end: data[data.length - 2]! };
+  const plot: Plot = { left: PAD.left, top: PAD.top, width, height, low, high, start: view.domain?.start ?? data[0]!, end: view.domain?.end ?? data[data.length - 2]! };
   drawGrid(ctx, plot, view, colors);
   drawPrevClose(ctx, plot, view, colors);
   drawLine(ctx, plot, data, colors, view.prevClose);
