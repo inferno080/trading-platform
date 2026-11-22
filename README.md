@@ -2,403 +2,169 @@
 
 [![CI](https://github.com/inferno080/trading-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/inferno080/trading-platform/actions/workflows/ci.yml)
 
-A real-time trading dashboard built to explore streaming-data performance in the browser: a separate mock market-data server pushes tens of thousands of quote updates per second over WebSocket into a React UI.
+A real-time trading dashboard built to explore streaming-data performance in the browser. A separate mock market-data server pushes **50,000 quote updates per second for 5,000 instruments** over WebSocket. Two versions of the React frontend show the same market side by side: a **deliberately naive** one (every message goes into React state) and an **optimized** one (Web Worker, conflation, a store outside React, a virtualized grid). A built-in recorder measures both.
 
-**Status:** backend with chaos commands and per-instrument reference data is done; the frontend has the deliberately naive client and the performance HUD, and the Optimized tab (the default) now has a Web Worker, conflation and an AG Grid; reconnecting and more HUD metrics are still to come.
+## Results
+
+| | Naive | Optimized |
+| --- | --- | --- |
+| Frame rate (average) | 11.7 FPS | **60 FPS** |
+| Worst frame | 416.6 ms | **17.7 ms** |
+| Latency p50 / p99 | 3,510 ms / 4,830 ms | **4 ms / 5 ms** |
+| Updates handled per second | 2,199 of 50,000 | **49,967 of 50,000** |
+| Sequence gaps (resyncs) | 9 | **0** |
+
+One 30-second run each, recorded back to back from a production build (commit `e8eb247`) at 5,000 instruments and 50,000 updates/s. Chrome 157, 8 logical cores, 1470 x 798 viewport, backend and browser on the same machine. The Optimized run used a refresh interval of 0, the hardest setting (every change is redrawn). Raw files: [`benchmarks/results/`](benchmarks/results/).
+
+- **Optimized keeps up with the whole feed.** Decoding runs in a worker, so the main thread only draws: no frame over 17.7 ms and a median latency of 4 ms.
+- **Naive falls behind.** Re-rendering 5,000 rows per message keeps the main thread busy, so frames queue in the browser (that queue is the latency). The server drops frames for a client that is not reading, so Naive received 2.2 of the 50 frames each second, none at all in 21 of the 30 seconds, and had to resync 9 times.
+- **Caveats.** A single run each, so the numbers show the size of the gap, not a precise ratio. They depend on the machine, and 60 FPS is the display's refresh rate.
+
+### Record a run
+
+1. Start the backend (`cd backend && npm start`) and the production build (`cd frontend && npm run serve:prod`), and open http://localhost:4173 in a normal browser window. Keep the tab visible and close other heavy tabs and apps.
+2. For the **Optimized** tab set **Refresh every (seconds)** to **0**. The default (1.5 s) redraws only now and then, which makes FPS and worst frame look much better than they are; the panel warns while it is above 0.
+3. Wait for **Live**, then press **Record 30-second run** in the toolbar. After about 33 seconds the browser downloads a file such as `2026-11-22T19-26_naive_50k.json`; move it into `benchmarks/results/`.
+
+Use `serve:prod` only: the development build is much slower, and the file records which build made it. Each file holds the mode (`naive` or `optimized`), build, git commit, load, environment, the refresh setting (`null` for Naive, which has none), whether the tab was hidden during the run, a summary (FPS, worst frame, message and update rates, latency p50 and p99, gaps) and the per-second samples behind it. Latency is measured from the server's send time to arrival in the browser, so it assumes both share a clock (true on one machine).
+
+### Recorded runs
+
+| File | Mode | Refresh | FPS avg | Latency p50 | Notes |
+| --- | --- | --- | --- | --- | --- |
+| [`2026-11-22T19-26_optimized_50k.json`](benchmarks/results/2026-11-22T19-26_optimized_50k.json) | optimized | 0 s | 60.0 | 4 ms | Commit `e8eb247`, the run in the table above |
+| [`2026-11-22T19-26_naive_50k.json`](benchmarks/results/2026-11-22T19-26_naive_50k.json) | naive | none | 11.7 | 3,510 ms | Commit `e8eb247`, the run in the table above |
 
 ## Architecture
 
 ```
-┌────────────────────┐   WebSocket (MessagePack)   ┌──────────────────────┐
-│  backend (Node/TS) │ ───────────────────────────▶ │  frontend (React/TS) │
-│  market simulator  │   session, snapshot, deltas  │  naive client + HUD  │
-└────────────────────┘                              └──────────────────────┘
+┌─────────────────────────┐   WebSocket, MessagePack    ┌────────────────────────────────────────────┐
+│ backend (Node, TS)      │ ──────────────────────────▶ │ frontend (React, TS)                       │
+│  market simulator       │   session, snapshot, deltas │                                            │
+│  depth, trades, history │                             │  Optimized: Web Worker ─▶ store ─▶ AG Grid │
+│  RFQ dealer, chaos      │ ◀────────────────────────── │  Naive:     socket ─▶ React state ─▶ table │
+└─────────────────────────┘   subscribe, history, rfq   └────────────────────────────────────────────┘
 ```
 
-The backend runs as its own process, so the client has to deal with a real network feed rather than an in-page timer. There is no database: the market lives in memory.
+The backend is its own process, so the client deals with a real network feed. There is no database. The server sends a snapshot on connect, then one delta every 20 ms with only the quotes that changed and a sequence number; a client that sees a gap asks for a new snapshot.
+
+In the Optimized tab one update takes this path:
+
+1. A **Web Worker** owns the socket, decodes the frame and marks the instrument "changed". Twenty ticks of one instrument between two frames are sent once (**conflation**).
+2. The page asks the worker for what changed **once per animation frame**, with one request outstanding, so a slow page just gets more conflation.
+3. The answer goes into a **store outside React**, which joins quotes with their reference data and turns wire integers into prices.
+4. **AG Grid** gets the changed rows as one transaction and draws only what is on screen.
+
+## Design decisions
+
+| Decision | Why |
+| --- | --- |
+| Separate backend process, no database | A real feed with real latency and backpressure |
+| Binary MessagePack, fixed-point integer prices per instrument | Smaller and faster than JSON; exact prices across instruments with different decimals |
+| Snapshot + sequence-numbered deltas + resync | Small frames; gaps are detectable and recoverable |
+| Opt-in messages (reference data, subscribe, history, RFQ) | Adding a feature never changes the stream the baseline sees |
+| Server drops stream frames for slow clients, never replies | The server stays healthy; one-off answers are not lost |
+| Zipf-skewed activity, drift-free timer, seeded generator | Realistic uneven load, an exact 50,000/s, and repeatable runs |
+| One worker; the page pulls once per frame | The consumer sets the pace, so a slow page degrades gracefully |
+| Store outside React | A batch costs one pass over the changed rows, not a render |
+| AG Grid Community with only the modules used | Virtualization, sort, filter and keyboard support, about 26% smaller |
+| Hand-drawn canvas charts, one shared renderer | Full control and no charting library for a line and a crosshair |
+| One global refresh interval (1.5 s default, 0 to benchmark) | Numbers a person can read; the fastest setting for measuring |
+| Naive tab kept, with the same columns and chart | A fair comparison is the point of the project |
+| Chart ranges and 1D sessions made up on the server, on request | Deterministic, nothing stored, always ends at the live price |
+| RFQ as a pure state machine, exactly-once on the server | Impossible states cannot happen; retries are safe |
+| Reconnecting with exponential backoff and jitter | A struggling server is not hammered by returning clients |
+| Cypress only, no backend tests | One tool for components and the real app; the backend is a mock, type-checked and audited in CI |
+
+## Features
+
+- **Quotes grid:** all 5,000 instruments, per-cell flash (green up, red down, with arrows), sort and filter on every column, stale-row marking.
+- **Price chart:** 1D, 1M, 1Y, YTD and MAX on a canvas. 1D is a trading session (New York, Frankfurt, Tokyo or round the clock) that starts at the previous close; times are on the market's own clock.
+- **Order book and trades tape**, a **watchlist** with mini charts, and a **request-for-quote ticket** with a countdown.
+- **Resilience:** automatic reconnecting, and **chaos controls** (pause, drop a frame, drop the connection, burst, latency) that make the server misbehave on purpose.
+- **Performance HUD** with a recorder that saves a run as JSON.
+
+## Accessibility
+
+Built to **WCAG 2.2 AA**.
+
+- **Keyboard:** everything works without a mouse, including the grid (Enter sorts, Ctrl+Enter opens a filter), the watchlist and the RFQ ticket.
+- **Focus:** managed on open and close; in the ticket it moves to the status, never onto Accept, and Escape turns a quote down before it closes the dialog.
+- **Screen readers:** polite live regions announce a quote once and a warning at 3 seconds; charts carry a text summary; accessible names contain the visible text.
+- **Not colour alone:** arrows, words and text accompany every red and green; light, dark and high-contrast themes; reduced motion turns the flash off.
+- **Checked** with `jsx-a11y` and axe scans of both tabs in every theme and language. A manual screen-reader pass is still to do.
+
+## Internationalization
+
+- **en-US, en-GB and ja-JP**, remembered across visits; UK English is a short list of overrides.
+- **Whole-sentence messages**, never joined fragments, so each language orders words and punctuates its own way.
+- **Numbers, prices, dates and times** go through `Intl`; times are written on the market's own clock and zone.
+- Tests check that translations match the English messages and placeholders.
+
+## Run it
+
+```bash
+cd backend  && npm install && npm start            # ws://localhost:8080
+cd frontend && npm install && npm run serve:prod   # http://localhost:4173 (use this for benchmarks)
+```
+
+The **Optimized** tab is the default; **Naive** is the baseline. `npm run dev` is for development (its numbers are not representative). Set `VITE_WS_URL` to point at a backend on another address.
 
 ## Backend
 
-Located in [`backend/`](backend/). Node 22, TypeScript, [`ws`](https://github.com/websockets/ws) and [`@msgpack/msgpack`](https://github.com/msgpack/msgpack-javascript).
+Node 22, TypeScript, [`ws`](https://github.com/websockets/ws) and [`@msgpack/msgpack`](https://github.com/msgpack/msgpack-javascript), in [`backend/`](backend/).
 
-```
-backend/
-  src/
-    config.ts                 env-driven settings
-    protocol/
-      messages.ts             wire types: Session, Snapshot, Delta, Quote, Depth, Trades, requests
-      codec.ts                MessagePack encode/decode
-    sim/
-      rng.ts                  seeded PRNG for reproducible runs
-      marketSimulator.ts      in-memory random-walk market with skewed (Zipf) activity
-      instruments.ts          the instrument groups (currency, decimals, tick size) and their names
-      depth.ts                builds the order book (depth ladder) around a quote
-      history.ts              ring buffer of recent last prices per instrument
-    server/
-      index.ts                WebSocket server, tick loop, fan-out, stats log
-      ticker.ts               drift-free timer (keeps an absolute schedule)
-      chaos.ts                fault-injection state and the commands that change it
-      subscriptions.ts        which clients watch which instruments, with the per-client limit
-  scripts/
-    smoke-client.ts           headless client: checks seq gaps and latency
-    chaos.ts                  command-line tool that sends a chaos command to a running server
-```
-
-### Run it
-
-```bash
-cd backend
-npm install
-npm start          # ws://localhost:8080
-```
-
-In a second terminal, from `backend/`:
-
-```bash
-npm run smoke      # prints updates/s, sequence gaps, p50/p99 latency (Ctrl+C to stop)
-```
-
-Other scripts: `npm run dev` (restart on change), `npm run typecheck`.
-
-### Configuration
-
-Set through environment variables:
-
-| Variable | Default | Meaning |
+| Setting (environment variable) | Default | Meaning |
 | --- | --- | --- |
-| `PORT` | `8080` | WebSocket port |
 | `INSTRUMENTS` | `5000` | Number of simulated instruments |
-| `UPDATES_PER_SEC` | `50000` | Target quote updates per second, across all instruments |
-| `TICK_MS` | `20` | Simulator tick interval; one delta frame is sent per tick |
-| `MAX_BUFFERED_BYTES` | `4194304` | Per-client socket buffer limit before frames are dropped |
-| `SEED` | `42` | PRNG seed |
-| `MAX_SUBSCRIPTIONS` | `5` | Most instruments one client may subscribe to (depth and trades) at once |
-| `DEPTH_LEVELS` | `10` | Rungs on each side of the order book |
-| `HISTORY_POINTS` | `300` | Price history points kept per instrument |
-| `HISTORY_INTERVAL_MS` | `1000` | Time between price history points (300 points at 1 s is the last 5 minutes) |
-| `RFQ_VALID_MS` | `10000` | How long a quote from the dealer can be accepted |
-| `RFQ_MAX_QUANTITY` | `1000000` | The largest quantity the dealer quotes |
-| `RFQ_THINK_MS` | `400` | The dealer's base thinking time before quoting (up to 0.8 s more is added, different for each request) |
-| `RFQ_MAX_OPEN` | `3` | Most requests one client may have in progress at once |
-| `ACTIVITY_SKEW` | `1` | How unevenly updates are spread over the symbols: `0` = all equally active, `1` = a few hot symbols produce most of the updates |
+| `UPDATES_PER_SEC` | `50000` | Target quote updates per second |
+| `ACTIVITY_SKEW` | `1` | `0` = every symbol equally active, `1` = a few hot symbols (Zipf) |
+| `MAX_SUBSCRIPTIONS` | `5` | Instruments one client may follow in detail |
+| `MAX_BUFFERED_BYTES` | `4194304` | Per-client buffer limit before stream frames are dropped |
 
-Example: `INSTRUMENTS=10000 UPDATES_PER_SEC=100000 npm start`
+**Protocol** (binary MessagePack, prices are integers scaled by each instrument's `decimals`):
 
-### Update distribution
+- `session`, `snapshot`, `delta`: the handshake, the full state, and one delta per 20 ms tick with a `seq` that rises by one. `resync` asks for a new snapshot.
+- `reference`: names, currency, decimals, tick size and previous close of every instrument, on request.
+- `subscribe` / `unsubscribe`: depth (order book) and trades for one instrument, up to 5 per client.
+- `history`: a price series for one instrument over `5m`, `1d`, `1m`, `1y`, `ytd` or `max` (all but `5m` are made up on request, deterministically, ending at the live price).
+- `rfq`, `rfqAccept`, `rfqReject` / `rfqQuote`, `rfqResult`: a simulated dealer that quotes a price (one tick worse per 5,000 shares), holds it for 10 seconds, and fills it exactly once.
+- `chaos`: makes the server misbehave for every client, from the UI or `npm run chaos -- <action>`.
 
-Real markets are uneven, so by default the simulator is too. The symbol at rank *r* gets weight `1 / r^skew` (Zipf's law), and symbol 0 (`AAA`) is the most active. With the default skew of 1 and the default load, `AAA` alone gets about 11% of all updates (about 5,500 a second), the ten hottest symbols get about 32%, and the quietest half of the symbols together get about 7%. That is what makes conflation (keeping only the latest update per symbol per frame) worth measuring. With `ACTIVITY_SKEW=0` every symbol gets about 10 updates a second.
-
-### Protocol
-
-All frames are binary MessagePack. Prices are fixed-point integers in **each instrument's own scale**: the real price is the wire value divided by `10^decimals`, where `decimals` comes from that instrument's reference data (for example, a USD equity with 2 decimals sends 187.42 as `18742`, and a yen equity with 0 decimals sends 47,213 as `47213`). The current protocol version is **2**; version 1 used one global scale for every instrument.
-
-- **`session`**: sent once per connection, before the first snapshot, in the style of a FIX Logon. Carries the protocol version (`v`), server time, instrument count, tick interval and target update rate.
-- **`snapshot`**: sent on connect and on request. Contains every quote (`id`, `sym`, `bid`, `ask`, `bidSz`, `askSz`, `last`, `vol`, `ts`) and the `seq` it is current as of.
-- **`delta`**: one per tick. `seq` increases by exactly 1 per frame. Carries only the quotes that changed, plus the server send time `ts` so clients can measure end-to-end latency.
-- **`resync`** (client to server): requests a fresh snapshot.
-- **`reference`** (client to server, then server to that client): `{ t: "reference" }` asks for the reference data, and the server replies with `{ t: "reference", instruments: [...] }`. It is opt-in, so a client that never asks sees exactly the stream it would have seen without this feature. See [Instruments and reference data](#instruments-and-reference-data).
-- **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
-- **`subscribe` / `unsubscribe`** (client to server): `{ t: "subscribe", id }` starts two extra streams for one instrument, to that client only: **`depth`** and **`trades`**. Each client can watch up to `MAX_SUBSCRIPTIONS` instruments (5 by default); beyond that, or for an unknown id, the server replies `{ t: "rejected", request: "subscribe", id, reason }` with `reason` `"limit"` or `"unknown-instrument"`. All of a client's subscriptions end when it disconnects. See [Instrument detail](#instrument-detail-depth-trades-and-history).
-- **`history`** (client to server, then server to that client): `{ t: "history", id, range? }` asks once for an instrument's price history. `range` is one of `"5m"` (the default: the last five minutes, the real buffer, one point per `HISTORY_INTERVAL_MS`), `"1d"`, `"1m"`, `"1y"`, `"ytd"` or `"max"` (made up when asked, see [Longer ranges](#longer-ranges)). The reply is `{ t: "history", id, range, session?, points: [[ts, price], ...] }`, oldest first; `session` (every range but `5m`) says which market session the series is of: `market`, `timeZone`, `continuous`, `open` and `close`. An unknown `range` is ignored like any malformed message.
-
-- **`rfq`** (client to server): `{ t: "rfq", ref, id, side, quantity }` asks the simulated dealer for a price for a size. `ref` is the client's own number for the request, which every later message about it carries. The dealer replies with **`rfqQuote`** `{ ref, id, side, quantity, price, screenPrice, validForMs }`, or declines with **`rfqResult`** (below). See [Requests for quotes](#requests-for-quotes-rfq).
-- **`rfqAccept` / `rfqReject`** (client to server): `{ t: "rfqAccept", ref }` takes a quote, `{ t: "rfqReject", ref }` turns it down.
-- **`rfqResult`** (server to client): how a request ended: `{ ref, outcome, ... }` with `outcome` one of `"filled"` (with `price` and `tradeId`), `"rejected"`, `"expired"`, `"declined"` (with `reason` `"quantity"`, `"unknown-instrument"` or `"busy"`) or `"unknown"` (the server has no such request).
-
-Clients detect a gap when `seq` skips, and respond by sending `resync`.
-
-### Backpressure
-
-Each frame is encoded once and sent to every client. If a client's socket buffer exceeds `MAX_BUFFERED_BYTES`, the server skips frames for that client instead of letting memory grow. The client sees the sequence gap and resyncs.
-
-### Instrument detail: depth, trades and history
-
-The grid shows one best bid and ask per instrument (level 1). A detail view needs more about the one instrument you are looking at. It is all opt-in, so a client that never subscribes receives exactly the stream described above.
-
-| Message | What it is | How it arrives |
-| --- | --- | --- |
-| `depth` | The order book (level 2): `bids` and `asks`, each a list of `[price, size]` rungs, best price first (`DEPTH_LEVELS`, 10 by default). `bids[0]` and `asks[0]` are the quote's own bid and ask. | A stream: once right after subscribing, then once per tick in which that instrument updated. It is the **whole** ladder every time, not a change, so a client just replaces what it had and needs no gap recovery |
-| `trades` | `{ id, trades: [{ ts, price, size, side }] }`: the trades since the last frame, oldest first. `side` is `"buy"` at the ask or `"sell"` at the bid. | A stream: only sent when there were trades. About a fifth of updates are a trade, which is what moves `last` and `vol` |
-| `history` | Recent `last` prices, oldest first | One reply to a request, not a stream |
-
-Prices are wire integers in the instrument's own scale, like quotes. The rungs below the top of the book are made up, but only from the instrument, the rung and the quote's time, so a ladder keeps its shape until the instrument next updates and the same quote always gives the same ladder. Depth and history never use the simulator's random generator for live prices, so subscribing does not change the market. The past points of the history are generated at start-up as a random walk that ends at the current price (with its own generator), and from then on one real point is added per interval. The walk is as lively as that instrument's live prices: each update moves a price by about 2 ticks, so over a second it wanders about 2 × √(updates per second) ticks. With the defaults, the busiest symbol (`AAA`) ranges over roughly 13% in the 5 minutes, a mid-table one a few percent, and a quiet one under 1%.
-
-The depth and trades of a tick travel with that tick's delta: the `latency` chaos command holds them back with it, a `gap` loses them with it, and `pause` stops them. A client that is not keeping up simply misses some, which does no harm, since the next ladder replaces the last one.
-
-The smoke client can exercise it: `SUBSCRIBE=0,1 HISTORY=0 npm run smoke` subscribes to instruments 0 and 1, asks for the history of 0, and prints depth and trade counts each second.
-
-### Longer ranges
-
-The real price buffer only holds five minutes, but a chart can also show a day, a month, a year, the year so far, or the whole life of an instrument. The simulator has no real past, so the server **makes these up when asked** (`backend/src/sim/rangeHistory.ts`), and stores nothing:
-
-| `range` | Covers | Bars |
-| --- | --- | --- |
-| `1d` | from the instrument's most recent session open to now; for FX the last 24 hours | 5-minute bars. It starts exactly at the previous close, so the dotted "previous close" line begins where the line does (see [Market sessions](#market-sessions)) |
-| `1m` | the last 30 days | daily, 31 points |
-| `1y` | the last 365 days | daily, 366 points |
-| `ytd` | since 1 January (UTC) | daily |
-| `max` | since the instrument "started trading" | weekly, hundreds of points |
-
-Every series is a random walk run backwards from the current price, so it **always ends at the price on the screen**. Each instrument has its own yearly volatility (15% to 60%) and its own listing date, between 2 and 25 years back, so `max` starts at a **different date for each instrument**. All of it comes from the instrument's number, so it is the same every run, and asking again a moment later gives the same shape (bar times sit on whole multiples of the bar length). Prices stay on the instrument's tick grid and never fall below one tick. The data is simulated, and the page says so beside the range buttons.
-
-### Market sessions
-
-The simulator's instruments trade on four markets, decided by their group (see [Instruments](#instruments-and-reference-data)): **US** equities (New York, 09:30 to 16:00), **EU** equities (Frankfurt, 09:00 to 17:30), **JP** equities (Tokyo, 09:00 to 15:00, the real lunch break left out) and **FX**, which trades round the clock. Each keeps its hours in its own time zone (`backend/src/sim/sessions.ts`, using the platform's IANA zone data, so daylight saving is right). Weekends are not treated specially.
-
-The **one-day chart** runs from the most recent session open (today's once the day's open has passed, otherwise yesterday's) **to now**, starting exactly at the previous close, so it always reaches the live price and agrees with the timestamps of the live trades. Before the close the line stops partway and the time axis still reaches the close (the right side is empty); after the close, or at a weekend, the line runs on past the close, since the feed does not stop. FX has no session, so its day is the last 24 hours. The reply carries the session (`market`, `timeZone`, `continuous`, `open`, `close`), and the page uses it for the time zone that times are written in and for how far the time axis reaches. The chart and the trades tape are written on the **market's own clock** (the tape's heading says which, for example "Time (EST)"), so they always agree.
-
-**Market hours are not enforced.** The live feed keeps moving at all hours and at weekends, so the demo and the benchmark do not depend on whether the real exchanges happen to be open. The sessions only decide what a one-day chart covers.
-
-### Requests for quotes (RFQ)
-
-On a real dealing platform a client does not always trade at the price on the screen. For a larger size it asks a dealer for a **request for quote**: the dealer says "I will trade this size at this price, for the next few seconds", and the client takes it or leaves it. The server has a simulated dealer for that (`backend/src/server/rfq.ts`). It is opt-in, like the other detail messages, and a client that never sends `rfq` never hears from it.
-
-1. The client sends `rfq` with a `ref`, the instrument, the side and the quantity.
-2. Bad requests are declined at once with an `rfqResult`: a quantity below 1 or above `RFQ_MAX_QUANTITY` (`"quantity"`), an unknown instrument (`"unknown-instrument"`), or more than `RFQ_MAX_OPEN` requests already in progress (`"busy"`).
-3. Otherwise the dealer "thinks" for `RFQ_THINK_MS` plus up to 0.8 s (a different delay for each request, but the same one for the same `ref`, so it is repeatable), then sends an `rfqQuote`.
-4. The price is the screen price **moved against the client by one tick for every 5,000 shares**, up to 50 ticks: a buy is the ask plus that, a sell is the bid minus that. `screenPrice` is the touch price at that moment, so a client can show how much worse the quote is. A larger size costs more, as in a real market.
-5. The quote stays open for `validForMs`. The client sends `rfqAccept` (result `"filled"`, with a `tradeId`), `rfqReject` (`"rejected"`), or does nothing and the server sends `"expired"`.
-
-**Exactly once.** A request ends exactly once. Accepting twice gives the same `filled` result with the same `tradeId` and does not trade again; accepting after expiry repeats `"expired"`; asking about a `ref` the server does not know gives `"unknown"`. The last 20 results of each client are remembered so these repeats are answered the same way. When a client disconnects, its open quotes and thinking requests are dropped. Prices use the same per-instrument wire scale as everything else.
-
-### Instruments and reference data
-
-The simulator has four groups of instruments, so the feed has to deal with different currencies, decimals and tick sizes, as a real multi-asset market does. The group is decided by the last digit of the instrument id, and the most active instruments (lowest ids) are USD equities.
-
-| Group | Share | Currency | Decimals | Tick size | Starting price |
-| --- | --- | --- | --- | --- | --- |
-| USD equities | 60% | USD | 2 | 0.01 | 5 to 500 |
-| EUR equities | 10% | EUR | 3 | 0.005 | 5 to 500 |
-| JPY equities | 20% | JPY | 0 | 1 | 500 to 50,000 |
-| FX-style | 10% | USD | 4 | 0.0001 | 0.5 to 2 |
-
-Every price sits on a multiple of its tick. The spread between bid and ask starts at 2 to 8 ticks and then moves: about 15% of updates widen or narrow it by one tick (by moving the bid or the ask), staying between 2 and 12 ticks. A client asks for the static facts about every instrument with a `reference` message and gets one entry each:
-
-| Field | Meaning |
+| Chaos action | Effect |
 | --- | --- |
-| `id` | The instrument id used in snapshots and deltas |
-| `name` | A fictional company or currency-pair name. Names are not unique; the symbol is the identifier. |
-| `currency` | ISO currency code |
-| `tickSize` | The smallest allowed price move, as a real price (for example `0.005`) |
-| `decimals` | Decimal places of a price, which also sets the wire scale (`10^decimals`) |
-| `prevClose` | The previous close as a wire integer, so CHG% is `price / prevClose - 1` |
-
-The previous close is the starting price moved by about 1% (never more than 5%), so CHG% starts spread around zero. The reference data is about 420 KB, is encoded once, and is sent only to a client that asks.
-
-### Chaos commands
-
-The server can be told to misbehave on purpose, so you can watch how a client copes. Commands affect **every connected client**, not just the sender, which is what lets a second terminal disturb your browser tab. This is a local development server with no authentication, so any connected client can send them.
-
-The page has the same commands as buttons (see **Chaos controls** under [Frontend](#frontend)). Or send one from a second terminal while the backend runs:
-
-```bash
-cd backend
-npm run chaos -- pause          # freeze the feed
-npm run chaos -- latency 500    # delay every frame by 500 ms
-npm run chaos -- reset          # clear every fault
-```
-
-| Action | What the server does | What a client should notice |
-| --- | --- | --- |
-| `pause` | Stops making updates and stops using sequence numbers | No frames at all; the feed goes stale. After `resume` the sequence continues with no gap. |
-| `resume` | Ends a pause | Frames flow again |
-| `gap` | Creates the next frame and counts it, but never sends it | A jump in the sequence, so the client must ask for a snapshot |
-| `drop` | Abruptly closes every connection, like a network failure | The socket closes |
-| `burst [seconds]` | Sends 5x the normal updates per frame (default 5 seconds, at most 60) | A flood: about 250,000 updates a second at the default load |
-| `latency <ms>` | Holds every frame back by that long (at most 5,000 ms); `0` removes it | Latency figures rise by that amount. Frames still arrive in order. |
-| `reset` | Clears every fault | Normal service |
-
-While a fault is active, the server's once-a-second log line ends with `chaos=[...]`, for example `chaos=[latency=500ms]`. Each command also logs one line saying what it did. Point the tool at another server with `URL=ws://host:port npm run chaos -- pause`.
-
-### Measured (local, one client, default settings)
-
-Measured on a development laptop with the smoke client running on the same machine, so treat these as a baseline, not a benchmark.
-
-| Metric | Value |
-| --- | --- |
-| Updates/sec delivered | 50,000 (target 50k) |
-| Bandwidth | about 26 Mbit/s |
-| Snapshot size | about 359 KB (5,000 quotes) |
-| Latency p50 | 3-4 ms |
-| Latency p99 | 5-8 ms |
-| Sequence gaps | 0 |
-
-The server uses a drift-free timer (`ticker.ts`): it keeps an absolute schedule instead of waiting a full interval after each tick, so the delivered rate matches the target. With plain `setInterval` it delivered about 47.7k a second, because every small delay added up.
+| `pause` / `resume` | Stop and restart the feed |
+| `gap` | Lose the next frame, so the client must resync |
+| `drop` | Close every connection, like a network failure |
+| `burst [s]` | 5x the normal updates for a few seconds |
+| `latency <ms>` | Delay every frame |
+| `reset` | Clear every fault |
 
 ## Frontend
 
-Located in [`frontend/`](frontend/). Vite, React 19, TypeScript, [`react-intl`](https://formatjs.github.io/docs/react-intl/) for i18n, and ESLint with `jsx-a11y`.
+React 19, TypeScript, Vite, AG Grid Community, `react-intl`, in [`frontend/`](frontend/).
 
 ```
 frontend/src/
-  protocol/      wire types (mirrored from the backend) and MessagePack codec
-  iterations.ts  registry of frontend iterations, one entry per tab
-  shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
-  feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
-  chart/         the price chart shared by both tabs: data helpers, canvas drawing, the detail panel
-  chaos/         the chaos controls panel (buttons that make the server misbehave on purpose)
-  rfq/           the request-for-quote ticket: its state machine, the port it talks through, and the dialog
-  watchlist/     the watchlist panel, its saved state, the toast and the 70/30 layout
-  optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
-  naive/         the baseline: WebSocket straight into React state, plain table of all rows
-  hud/           performance HUD, metrics collector, and the run recorder
-  i18n/          react-intl setup; en-US messages, en-GB overrides (only the strings that differ), and ja-JP
-  lib/format.ts  cached Intl.NumberFormat helpers
-  styles/        design tokens (light, dark, high contrast) and base styles
+  feed/        the Web Worker, the connection logic inside it, and the reconnect policy
+  optimized/   the Optimized tab: the store the worker feeds, and the grid
+  naive/       the Naive tab: WebSocket straight into React state
+  chart/       canvas charts, ranges and sessions, the shared instrument panel
+  rfq/         the request-for-quote ticket and its state machine
+  hud/         the performance HUD and the run recorder
+  i18n/        messages: en-US, en-GB overrides, ja-JP
 ```
 
-Each version of the frontend is an **iteration**, shown as a tab in the header and linkable by URL (for example `http://localhost:4173/#/naive`). The first tab, **Optimized**, is the default. Each iteration's page is loaded with a dynamic import and wrapped in the same error handling, so a failed download shows a message with a Reload button instead of a blank page. Only the active iteration is mounted: a tab you are not looking at does not exist in the page. It holds no WebSocket connection, no timers and no table rows, and leaving the Naive tab closes its connection and frees its 5,000 rows. Its code is not even downloaded until you open it. To add an iteration, build its page and add one entry to `frontend/src/iterations.ts`.
+## Testing and quality
 
-The **Optimized** iteration moves the work off the page, in four stages:
-
-1. **A Web Worker owns the connection.** It opens the WebSocket, checks the protocol version, asks for the reference data once, decodes every frame, keeps the full market state, and recovers from a missed frame (a sequence gap) by asking the server for a new snapshot. Leaving the tab terminates the worker and its connection.
-2. **The worker conflates.** An instrument that ticked twenty times between two frames is sent once, with its latest state. The page asks for what changed **once per animation frame**, with at most one request outstanding, so a slow page just gets more conflation. If an answer never comes, it asks again after 2 seconds.
-3. **A store outside React.** The answer goes into a small store that joins each quote with its reference data and turns wire integers into real prices. React does not render 60 times a second; only the grid hears about the rows that changed.
-4. **AG Grid draws only what is on screen.** Changed rows reach AG Grid Community as one transaction. Only the modules the grid uses are registered, which keeps the chunk about 26% smaller than registering everything.
-
-What you see and can change:
-
-- **Refresh every (seconds)**, a number box that starts at **1.5** and sets how often **everything on screen** refreshes: the quotes and the price chart. They collect the changes (keeping the latest state of each row, and of the chart) and redraw together once per interval; **0** redraws every change as it arrives. Hovering the chart still moves its crosshair at once. The data still arrives and is counted at full speed. One shared redraw means everything that changed flashes in the same instant, which is more noticeable at long intervals; a short interval hides it.
-- **Flashing** is per cell and coloured by direction: green when a value moved up, red when it moved down, with ▲/▼ marks as well so it never relies on colour alone. Chg % flashes by its own sign. The flash is off when the OS asks for reduced motion.
-- **Sort and filter** on every column. Each heading has a filter button beside its name. With the keyboard, Tab to a heading, then **Enter** sorts and **Ctrl+Enter** opens its filter (Alt+Down also works).
-- Rows with no update for 5 seconds are marked in the data but drawn as normal text, and nothing is marked while the tab is hidden.
-- The performance panel above the grid shows the live rates, and can be collapsed to its heading (it keeps sampling while collapsed). The **Record run** button is in the toolbar, beside the **Watchlist** button, on both tabs; there is no separate panel of connection facts.
-
-**Price chart.** Click a row (or use the symbol button in the Naive table, or Enter on a grid cell) to open a price chart for that symbol above the quotes; Escape or **Close chart** closes it. It shows the last five minutes: the server's price history (see [Instrument detail](#instrument-detail-depth-trades-and-history)) with live prices folded into the newest second. Both tabs draw it on an HTML `<canvas>` with the same drawing code (`frontend/src/chart/`), so they look identical; they differ in what drives it:
-
-| | Naive | Optimized |
-| --- | --- | --- |
-| Data | React state, copied and set again on every update of the symbol | Kept by the worker, which sends the whole chart only when it changed |
-| Drawing | An effect that redraws on every state change, on the page's thread | At most one drawing pass per animation frame, read from the store, with no React render |
-
-**Order book and trades.** Below the open chart, side by side, the panel shows the open symbol's **order book** (level 2): the ten best bids on the left and asks on the right, best prices at the top, each size with a bar behind it as long as the size is large compared with the others. Under it is the **trades tape**: the ten most recent trades, newest first, with time, price, size and the side written out (▲ Buy, ▼ Sell) as well as colored. Both come from the server's `depth` and `trades` streams for the open symbol (see [Instrument detail](#instrument-detail-depth-trades-and-history)). The Naive tab keeps them in React state, which every message replaces; the Optimized tab keeps them in the worker and the store, and only this small component re-renders, at the refresh interval (every change at 0). Until the first order book arrives, the area shows a skeleton. On a narrow screen the two sit one above the other.
-
-**Price and today's move.** Under the open symbol's heading, and on each watchlist tile, the current price is shown large, followed by an arrow and the percentage it has moved since the previous close, then the amount and "Today" in smaller text, for example `912.76  ▲ +0.62%  (+5.65) Today`. The move is green when up and red when down, and the arrow says the same without color. The price is the newest point of the chart's data, so it follows live updates. The chart lines (the big one and the mini ones) are colored by the same comparison, the newest price against the previous close, so a chart is never green while its price is red. A dotted line at the previous close (labelled "Prev close" with its price on the big chart) shows what the color is measured against, and the price axis always includes it. On the Optimized tab only this small component re-renders, at the refresh interval.
-
-**Chart ranges.** Below the chart, buttons choose **1D** (the default), **1M**, **1Y**, **YTD** and **MAX**, on both tabs. All of them are the simulated histories described under [Longer ranges](#longer-ranges), and the row says "Simulated history" beside the buttons. The server's real five-minute buffer is still what the watchlist's mini charts show. A range is asked for once, when it is first shown, and only for the open symbol. The newest point of a longer chart follows the live price, so its price and the line never disagree. The Optimized worker keeps one series per range for the open symbol; the Naive tab keeps them in React state and copies them on every update. The colour, the dotted line and the price move are measured against the **previous close** for 1D (labelled "Prev close", with "Today"), and against **where the range starts** for the longer ones (labelled "Start", with "1 month", "1 year", "YTD" or "All time"). Dates and times on the axis and in the hover label are written by `Intl` in the page's language and order (for example `Nov 21`, `21 Nov` and `11月21日` for a month range; `2016年` on the longest range in Japanese), and a screen reader hears a sentence for the range ("price over the last month: last …, high …, low …").
-
-The chart has price and time axes (prices in the instrument's own decimals), a crosshair with a time and price label on hover, a shimmering skeleton while the history loads, and a sentence for assistive technology (last, high and low over the period). It follows the theme and the language.
-
-**Request a quote.** The open symbol's header has a **Request a quote** button (beside Add to watchlist) that opens a dialog with the ticket: Buy or Sell, a numeric quantity (1 to 1,000,000, checked before anything is sent), and **Request quote**. What the ticket shows follows a small state machine in `frontend/src/rfq/machine.ts` (`idle`, `requesting`, `quoted`, `accepting`, `accepted`, `rejected`, `expired`, `declined`, `failed`). Each state shows only what makes sense in it, and an event that does not fit the current state changes nothing, so an impossible combination (an accept with no quote, a second fill) cannot happen.
-
-When the quote arrives, the ticket shows it in words ("You buy 4,888 AAA at 303.98"), how much worse it is than the screen price, a countdown (a ring and the seconds, turning amber in the last 3 seconds) and **Accept** and **Reject**. The countdown is measured from when the quote reached the page. A quote that runs out shows "The quote expired. The price may have moved." with **Request again**. A request the server does not answer in 8 seconds, or a lost connection, ends as failed; if that happens while accepting, the message says the trade may or may not have been done, so check before trying again. Closing the dialog with a quote open turns it down.
-
-It works with the keyboard alone: Enter in the quantity box sends the request, **Escape turns an open quote down** (and the next Escape closes the dialog), and the dialog keeps focus inside it and gives it back to the button when it closes. When something happens, focus moves to the status, never onto Accept, so a stray Enter cannot trade. A polite live region reads out the quote once when it arrives and warns once when 3 seconds are left.
-
-Both tabs show the same ticket through a small `RfqPort` (request, accept, reject, and a way to listen). The Naive tab sends from the page's own connection; the Optimized tab asks its worker, which owns the connection, and the worker passes the dealer's replies back. On the Naive tab the dealer's reply waits in the same queue as the price updates, behind the page's backlog, so it can arrive late; that is one more thing the worker fixes.
-
-**Languages.** The page is available in US English (the default), UK English and Japanese, chosen from the language menu and remembered in the browser; the document's `lang` follows the choice, so screen readers pick the right voice. Every visible string is a message (nothing is written into the components), and the numbers, prices and times are formatted for the language with `Intl`. UK English is only a short list of overrides (such as "Optimised"); everything else falls back to US English. Messages are whole sentences with their own placeholders, never English fragments joined in code, so a language can order words and use its own punctuation (the Japanese status reads `再接続中（2回目）`, with full-width brackets). The tests check that Japanese has exactly the same messages and placeholders as English, that no Japanese message was left in English or uses English punctuation after Japanese text, that UK English overrides only messages that exist and has no American spellings, and the automated accessibility scans run in all three languages, in light and dark.
-
-**Reconnecting.** If the connection is lost, or never opens, both tabs try again by themselves, using the same policy (`frontend/src/feed/reconnect.ts`): the wait starts at 1 second and doubles after each failed attempt up to 15 seconds, and half of each wait is random, so many clients cut off together do not all come back at the same instant (and a struggling server is not hammered). A connection that works (the server's `session` arrives) starts the count again. The status shows **Reconnecting (attempt 3)** with a countdown to the next try and a **Retry now** button; the countdown is for the eyes only (it is hidden from screen readers, who hear the state and the attempt number when they change). On the Optimized tab the policy runs inside the worker, which owns the connection; on the Naive tab it runs in the page, next to its own socket. After a reconnect the page asks again for what a new connection knows nothing about: the reference data, a fresh snapshot, and the history and subscriptions of the open chart and the watchlist. The last prices stay on screen meanwhile (rows go stale after 5 seconds, as usual), and a request for a quote that was in progress ends as failed. A server speaking a protocol version the client does not understand is never retried, since trying again cannot help.
-
-**Chaos controls.** A collapsed **Chaos controls** section under the performance panel, on both tabs, has a button for each of the server's fault commands (see [Chaos commands](#chaos-commands)), each with a one-line explanation: pause and resume the feed, lose one frame (so the page sees a sequence gap and resyncs), drop the connection (so the page reconnects), send a burst (1 to 60 seconds, five times the normal updates) and add latency (0 to 5,000 ms). The two numbers stop at their largest value as you type. The buttons only work while the connection is live, and they affect **every** client connected to the server, so a second browser tab feels them too. The page sends them over its own connection (through the worker on the Optimized tab), and the server does not acknowledge them: "Sent: …" means the command left the page, and its effect shows in the performance panel, the status and the grid. The panel cannot tell whether a fault set by another client is active.
-
-**Watchlist.** Beside the open chart panel (the chart panel has 70% of the width and the watchlist 30%, in a row above the quotes) is a collapsible watchlist, shown or hidden with the **Watchlist** button in the toolbar. When it is collapsed the chart panel uses the whole row, and with no chart open the watchlist spans the row with its cards side by side. The quotes are below, across the full width, on both tabs. From an open chart, **Add to watchlist** puts the symbol on it (and the button becomes **Remove from watchlist**); a fifth symbol is refused with a toast ("The watchlist is full (4 symbols)…"). Each entry has a mini chart with its latest price and how far it moved over the period (an arrow as well as a color), a button that opens its full chart, and a remove button. The list is saved in the browser, so it survives a reload and is shared by both tabs. Everything is reachable by keyboard: the toggle, the add and remove buttons, each entry's buttons, and the toast's Dismiss button; after removing an entry, focus moves to the watchlist heading. The toast does not take focus, is announced politely by screen readers, and stays while the pointer or focus is on it.
-
-Each symbol on the watchlist is a **subscription** on the server, and removing it unsubscribes. The open symbol is subscribed too, which is what makes the server send its order book and trades; that is why the watchlist holds 4 and not 5 (the server allows 5 subscriptions per client). Both tabs keep a chart for every symbol on the watchlist and the open one, built the same way as the big chart: the Naive tab in React state, copied and set on every update; the Optimized tab in the worker, drawn from the store at the refresh interval.
-
-The first iteration built, **Naive**, is **deliberately naive**: every message goes into `useState` and the whole 5,000-row table re-renders. It exists to be measured, then beaten by the optimized pipeline.
-
-The Naive table shows twelve columns: symbol, name, currency, bid, ask, spread, last, previous close, change %, bid and ask size, and volume. An instrument's tick size and decimals are static facts, so they are shown in the detail panel next to its chart and not as columns. Right after the session handshake (protocol version 2) it asks the server for the instrument reference data **once per connection** (see [Instruments and reference data](#instruments-and-reference-data)), and keeps it in a lookup by instrument id, separate from the quotes that change every frame. The table shows its loading skeleton until it has both the first snapshot and the reference data, because a wire price cannot be read without its instrument's decimals. If the reference data has not arrived after 10 seconds, the page says so. Each row is priced with its own instrument's decimals, so a yen price has none and an FX-style price has four. The Optimized tab shows the same twelve columns, so every version does the same visible work and the benchmark compares like with like.
-
-### Run it
-
-With the backend running (`cd backend && npm start`):
-
-```bash
-cd frontend
-npm install
-npm run dev          # development server with hot reload (numbers are NOT representative)
-npm run serve:prod   # production build on http://localhost:4173 (use this for benchmarks)
-```
-
-Other scripts: `npm run typecheck`, `npm run lint`, `npm run build`. Test scripts are listed under [Testing and code quality](#testing-and-code-quality).
-
-Set `VITE_WS_URL` to point at a backend on another address (default `ws://localhost:8080`).
-
-## Benchmarks
-
-The HUD shows live frame rate, worst frame, message and update rates, latency percentiles and sequence gaps. The **Record run** button in the toolbar measures 30 seconds (after a 3 second warm-up) and downloads a JSON file, which is saved in [`benchmarks/results/`](benchmarks/results/). See [`benchmarks/README.md`](benchmarks/README.md) for how to record a run.
-
-Latency is measured from the server's send timestamp to the moment the browser receives the frame, so it assumes the clocks match (true when everything runs on one machine). When the main thread is busy, frames queue up in the browser, and that queueing shows up in the latency number.
-
-| Pipeline | FPS avg | FPS min | Worst frame | Latency p50 | Latency p99 | Gaps | Result file |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Naive | 5.8 | 3.0 | 500 ms | 5,012 ms | 9,584 ms | 4 | [2026-11-18T21-00_naive_50k.json](benchmarks/results/2026-11-18T21-00_naive_50k.json) |
-| Optimized | not built yet | | | | | | |
-
-All runs use 5,000 instruments at a 50,000 updates/sec target, in a production build.
-
-**The Naive row is an early, interim result.** It was recorded against the first version of the backend (before the drift-free timer, skewed activity and later changes). The real comparison happens once, at the end of the project: Naive, Optimized and the grid version are all recorded in the same session, on the same machine, against the final backend, and this table is replaced with those numbers.
-
-**Environment for the Naive run:** Chrome 157 on macOS, 8 logical cores, 1837 x 997 viewport, tab visible for the whole run, built from commit `4f0ddbf` with no uncommitted changes. Naive latency is not a start-up effect: it is the client falling behind a feed it cannot keep up with, which is the point of this baseline.
-
-## Testing and code quality
-
-Every frontend feature ships with tests, and CI (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs everything on each push and pull request. The frontend is tested with **Cypress only**: component tests for the logic and components, and end-to-end tests for the real app. The backend is a development mock with no automated tests by design; CI type-checks it and audits its dependencies.
-
-```
-frontend/cypress/
-  component/   component and hook tests, mirroring src/ (coverage is measured here)
-  e2e/         the built app talking to the real backend, plus accessibility checks
-  support/     shared helpers: a fake WebSocket, a controllable matchMedia, fixtures
-```
-
-Run them from `frontend/`:
-
-| Command | What it does |
-| --- | --- |
-| `npm run test:ct` | Component tests, with Istanbul coverage collected into `frontend/coverage/` |
-| `npm run test:e2e` | End-to-end tests (needs the setup below) |
-| `npm run cy:open` | Cypress's interactive runner |
-| `npm run lint` | ESLint, including accessibility, React hooks and SonarJS code-smell rules |
-
-### Coverage
-
-Coverage is collected with [Istanbul](https://istanbul.js.org/) during the component tests, over everything in `frontend/src` except the bootstrap file `main.tsx`. A test loads every source module, so a file nobody exercises counts as uncovered instead of being skipped. The HTML report is written to `frontend/coverage/`, and the `lcov.info` file in it is sent to SonarCloud in CI. Coverage is checked by SonarCloud's Sonar way quality gate, through its **Coverage on New Code** condition (80% at the time of writing; the current value is shown under Quality Gates on [sonarcloud.io](https://sonarcloud.io)). See [Code quality gate](#code-quality-gate).
-
-### End-to-end tests
-
-They exercise the production build against the real backend, so start both first, with a light feed so the page stays responsive:
-
-```bash
-cd backend && INSTRUMENTS=200 UPDATES_PER_SEC=500 npm start      # terminal 1
-cd frontend && npm run build && npm run preview -- --port 4173    # terminal 2
-cd frontend && npm run test:e2e                                   # terminal 3
-```
-
-They cover the live table and grid, the price chart and the watchlist on both tabs (against the real backend, including that adding a symbol subscribes to it and removing it unsubscribes), loading and error states, navigation and keyboard use, the theme and language settings (including that they persist), a full real-time benchmark recording, and an automated WCAG 2.2 AA scan with [axe](https://github.com/dequelabs/axe-core) in both themes and both languages. The end-to-end run takes about a minute because the recording test runs in real time.
-
-An automated scan finds only part of the accessibility problems. A manual pass with a screen reader is still needed.
-
-### Code quality gate
-
-Code quality is judged by SonarCloud's default **Sonar way** quality gate; this project adds no custom conditions of its own (custom gates are a paid SonarCloud feature). Sonar way looks at new and changed code: ratings for reliability, security and maintainability, test coverage, duplication and reviewed security hotspots. The exact current conditions are shown under Quality Gates on [sonarcloud.io](https://sonarcloud.io).
-
-- **In CI:** the `quality` job sends the code and the frontend coverage report to SonarCloud and waits for the gate. It runs when the `SONAR_TOKEN` repository secret exists; without it the job says it was skipped. The project key and organization are in [`sonar-project.properties`](sonar-project.properties).
-- **Coverage:** SonarCloud reads the frontend coverage report only, so the backend, which has no tests, is excluded from the coverage figure.
-- **Also checked before SonarCloud sees the code:** TypeScript strict mode, ESLint with [SonarJS](https://github.com/SonarSource/SonarJS) rules, a complexity limit of 12 per function, and `npm audit` on runtime dependencies.
-- **One-time SonarCloud setup:** create the project, turn **Automatic Analysis** off (it conflicts with the CI scan), and add the analysis token as the `SONAR_TOKEN` repository secret.
-
-### Troubleshooting
-
-- **Cypress fails to start with `bad option: --no-sandbox`:** the `ELECTRON_RUN_AS_NODE` environment variable is set, which VS Code does for processes it launches. Run Cypress from a normal terminal, or prefix the command with `env -u ELECTRON_RUN_AS_NODE`.
-- **Cypress's Electron browser closes unexpectedly (`Timed out waiting for the browser to connect`):** run the same command with `--browser chrome`. Leftover headless Chrome processes from earlier runs can also get in the way of opening Chrome; quit any Chrome started by Cypress.
-- **Files named like `Hud 2.tsx` appear in the project:** they are copies made by Finder or a sync service, not part of the repository. Delete them; they break `npm run lint`.
-- **Node version:** CI uses Node 22. Cypress 15 and Vite 6 are used on purpose; Cypress 16 requires Vite 8, which needs a newer Node.
+The frontend has **925 component tests** and **191 end-to-end tests** (Cypress, run from `frontend/` with `npm run test:ct` and `npm run test:e2e`), with about 99.6% statement coverage. The end-to-end tests need a light feed: `INSTRUMENTS=200 UPDATES_PER_SEC=500 npm start` in `backend/`, then `npm run build && npm run preview` in `frontend/`. CI runs type checks, lint (complexity limit 12), a production build, a dependency audit and all tests, then SonarCloud's default Sonar way gate. The backend is a mock, so it is type-checked and audited but has no tests.
 
 ## Roadmap
 
-- [x] Frontend: naive React client, to capture a baseline
-- [x] Web Worker for the socket and decoding, with per-symbol conflation
-- [x] Virtualized grid (AG Grid), with cell flash on change, sort and filter
-- [x] Gap detection and resync in the worker
-- [x] Backend: per-symbol subscribe, L2 depth, trades stream and price history
-- [x] Price chart for the open symbol, on both tabs
-- [x] Collapsible watchlist with mini charts and subscribe/unsubscribe, on both tabs
-- [x] Order book and trades tape for the open symbol, on both tabs
-- [x] RFQ ticket with a state machine, and a simulated dealer on the backend
-- [x] Reconnect with backoff, and chaos controls in the UI
-- [ ] More languages (de-DE, Arabic right-to-left)
-- [x] Chart ranges: 1D, 1M, 1Y, YTD and MAX (simulated history, generated on request)
-- [x] Drift-corrected simulator timing
+- [x] Backend simulator, protocol, chaos commands, depth, trades, history, sessions and RFQ dealer
+- [x] Naive and Optimized frontends, with a benchmark recorder and the comparison above
+- [x] Grid, charts with ranges, order book, watchlist, RFQ ticket, reconnecting and chaos controls
+- [x] WCAG 2.2 AA accessibility and three languages
+- [ ] `/health` endpoint, smoke-client exit codes, demo video
+- [ ] Arabic (right to left) and German
+- [ ] Optional real market hours; a trades tape that keeps its last trades
