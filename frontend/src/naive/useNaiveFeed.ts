@@ -10,6 +10,7 @@ import {
   PROTOCOL_VERSION,
   type ChaosAction,
   type InstrumentReference,
+  type SessionInfo,
   type Quote,
   type Delta,
   type Depth,
@@ -77,10 +78,25 @@ function foldRanges(setRanges: (update: (previous: RangeCharts) => RangeCharts) 
   }
 }
 
+/** The sessions with only the open instrument's kept (the same object when nothing changes, so the page does not render again). */
+function onlySessionOf(sessions: Record<number, SessionInfo>, open: number | null): Record<number, SessionInfo> {
+  const keep = open !== null ? sessions[open] : undefined;
+  if (keep) return Object.keys(sessions).length === 1 ? sessions : { [open!]: keep };
+  return Object.keys(sessions).length === 0 ? sessions : {};
+}
+
 /** A longer chart for the open instrument arrived: keep it. Returns false for a reply that is not one (the five-minute chart, or a refusal). */
-function applyRangeReply(msg: HistoryData | Rejected, open: number | null, setRanges: (update: (previous: RangeCharts) => RangeCharts) => void): boolean {
+function applyRangeReply(
+  msg: HistoryData | Rejected,
+  open: number | null,
+  setRanges: (update: (previous: RangeCharts) => RangeCharts) => void,
+  setSessions: (update: (previous: Record<number, SessionInfo>) => Record<number, SessionInfo>) => void,
+): boolean {
   if (msg.t !== "history" || !msg.range || msg.range === LIVE_RANGE) return false;
-  if (msg.id === open) setRanges((previous) => ({ ...previous, [rangeKey(msg.id, msg.range)]: flatten(msg.points) }));
+  if (msg.id !== open) return true;
+  setRanges((previous) => ({ ...previous, [rangeKey(msg.id, msg.range)]: flatten(msg.points) }));
+  const { session } = msg;
+  if (session) setSessions((previous) => ({ ...previous, [msg.id]: session }));
   return true;
 }
 
@@ -138,6 +154,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
   const [charts, setCharts] = useState<Charts>({});
   const [chartUnavailable, setChartUnavailable] = useState<number[]>([]);
   const [rangeCharts, setRangeCharts] = useState<RangeCharts>({}); // the open instrument's longer charts
+  const [sessions, setSessions] = useState<Record<number, SessionInfo>>({}); // the market session of the open instrument's longer charts
   const requestedRanges = useRef(new Set<string>()); // longer charts asked for on this connection
   const syncRange = useRef<() => void>(() => undefined);
   const [book, setBook] = useState<Book>({ depth: null, tape: [] });
@@ -215,6 +232,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
         const kept = Object.keys(previous).filter((key) => prefix !== null && key.startsWith(prefix));
         return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept.map((key) => [key, previous[key]!]));
       });
+      setSessions((previous) => onlySessionOf(previous, selectedId));
       const ws = socket.current;
       if (selectedId === null || range === LIVE_RANGE || !ws || ws.readyState !== WebSocket.OPEN) return;
       const key = rangeKey(selectedId, range);
@@ -268,7 +286,7 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
             break;
           case "history":
           case "rejected":
-            if (!applyRangeReply(msg, openId.current, setRangeCharts)) applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
+            if (!applyRangeReply(msg, openId.current, setRangeCharts, setSessions)) applyChartReply(msg, tracked.current, setCharts, setChartUnavailable);
             break;
           case "rfqQuote":
             bridge.emit({ type: "quote", quote: msg });
@@ -352,5 +370,5 @@ export function useNaiveFeed(selectedId: number | null = null, watchlist: number
     if (ws?.readyState === WebSocket.OPEN) ws.send(encodeClientMessage(value === undefined ? { t: "chaos", action } : { t: "chaos", action, value }));
   }, []);
 
-  return { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq: bridge.port };
+  return { sessions, retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq: bridge.port };
 }

@@ -168,5 +168,6 @@
   "chart.summary.1y": "{symbol} の過去1年間の価格：直近 {last}、高値 {high}、安値 {low}。",
   "chart.summary.ytd": "{symbol} の年初来の価格：直近 {last}、高値 {high}、安値 {low}。",
   "chart.summary.max": "{symbol} の取引開始以来の価格：直近 {last}、高値 {high}、安値 {low}。",
-  "range.name": "{short}、{long}"
+  "range.name": "{short}、{long}",
+  "tape.timeZone": "時刻（{zone}）"
 }

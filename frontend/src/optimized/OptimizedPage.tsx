@@ -76,6 +76,7 @@ function SelectedChart({
   id: number;
   range: HistoryRange;
   onRangeChange: (range: HistoryRange) => void;
+
   unavailable: boolean;
   inWatchlist: boolean;
   onToggleWatchlist: () => void;
@@ -99,7 +100,7 @@ function SelectedChart({
       takeFocus={takeFocus}
       range={range}
       onRangeChange={onRangeChange}
-      side={<OptimizedBook store={store} decimals={instrument.decimals} refreshMs={refreshMs} />}
+      side={<OptimizedBook store={store} id={id} decimals={instrument.decimals} refreshMs={refreshMs} />}
       ticket={<RfqModal key={id} port={display.rfq} instrumentId={id} symbol={row.sym} decimals={instrument.decimals} />}
       price={
         <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" range={range} refreshMs={refreshMs} />

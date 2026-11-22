@@ -168,5 +168,6 @@
   "chart.summary.1y": "{symbol} price over the last year: last {last}, high {high}, low {low}.",
   "chart.summary.ytd": "{symbol} price so far this year: last {last}, high {high}, low {low}.",
   "chart.summary.max": "{symbol} price since it started trading: last {last}, high {high}, low {low}.",
-  "range.name": "{short}, {long}"
+  "range.name": "{short}, {long}",
+  "tape.timeZone": "Time ({zone})"
 }

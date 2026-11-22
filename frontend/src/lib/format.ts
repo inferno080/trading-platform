@@ -29,28 +29,35 @@ const cached = (key: string, create: () => Intl.NumberFormat): Intl.NumberFormat
 
 const timeFormats = new Map<string, Intl.DateTimeFormat>();
 
-/** Formats a time of day with seconds, such as "03:51:06 PM" or "15:51:06". */
-export const timeFormatter = (locale: string): Intl.DateTimeFormat => {
-  let format = timeFormats.get(locale);
+/** Formats a time of day with seconds, such as "03:51:06 PM" or "15:51:06", on the browser's clock or on a time zone's (a market's). */
+export const timeFormatter = (locale: string, timeZone?: string): Intl.DateTimeFormat => {
+  const key = `${locale}|${timeZone ?? ""}`;
+  let format = timeFormats.get(key);
   if (!format) {
-    format = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    timeFormats.set(locale, format);
+    format = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", ...(timeZone ? { timeZone } : {}) });
+    timeFormats.set(key, format);
   }
   return format;
 };
+
+/** The short name of a time zone as the language writes it, such as "EST": what a clock written in that zone should say it is. */
+export const timeZoneName = (locale: string, timeZone: string): string =>
+  new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "short" }).formatToParts(Date.now()).find((part) => part.type === "timeZoneName")?.value ?? timeZone;
 
 const rangeFormats = new Map<string, Intl.DateTimeFormat>();
 
 /**
  * The date or time format for a chart's time axis ("axis") or its hover label ("hover") over a range, in the language's own
  * order and style: the last five minutes by time of day, a day by time, a month by day and month, a year by month and
- * year, and the longest range by year. Examples (en-US / en-GB / ja-JP): "Nov 21" / "21 Nov" / "11月21日".
+ * year, and the longest range by year. With a time zone (the market's own), they are written on that clock. Examples (en-US / en-GB / ja-JP): "Nov 21" / "21 Nov" / "11月21日".
  */
-export const rangeTimeFormatter = (locale: string, range: HistoryRange, use: "axis" | "hover"): Intl.DateTimeFormat => {
-  const key = `${locale}|${range}|${use}`;
+export const rangeTimeFormatter = (locale: string, range: HistoryRange, use: "axis" | "hover", timeZone?: string): Intl.DateTimeFormat => {
+  const key = `${locale}|${range}|${use}|${timeZone ?? ""}`;
   let format = rangeFormats.get(key);
   if (!format) {
-    format = new Intl.DateTimeFormat(locale, RANGE_FORMATS[range][use]);
+    const options = { ...RANGE_FORMATS[range][use], ...(timeZone ? { timeZone } : {}) };
+    if (timeZone && range === "1d" && use === "hover") options.timeZoneName = "short"; // a time on an exchange's clock says which clock
+    format = new Intl.DateTimeFormat(locale, options);
     rangeFormats.set(key, format);
   }
   return format;

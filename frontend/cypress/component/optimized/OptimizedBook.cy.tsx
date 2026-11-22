@@ -13,7 +13,7 @@ const depth = (bid: number): DepthUpdate => ({
 const trade = (n: number, side: Trade["side"] = "buy"): Trade => ({ ts: 1_700_000_000_000 + n * 1000, price: 29900 + n, size: 100 * (n + 1), side });
 
 const bookElement = (store: FeedStore, options: { refreshMs?: number } = {}) =>
-  withI18n(<OptimizedBook store={store} decimals={2} refreshMs={options.refreshMs ?? 0} />);
+  withI18n(<OptimizedBook store={store} id={1} decimals={2} refreshMs={options.refreshMs ?? 0} />);
 const mountBook = (store = new FeedStore(), options: { refreshMs?: number } = {}) => {
   cy.mount(bookElement(store, options));
   return store;

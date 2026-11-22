@@ -2,6 +2,7 @@ import type { DepthLevel, InstrumentReference, Quote, QuoteUpdate, Trade } from 
 import { buildDepth } from "./depth.js";
 import { INSTRUMENT_CLASSES, classIndexFor, nameFor } from "./instruments.js";
 import { createRng, type Rng } from "./rng.js";
+import { marketOfClass, type Market } from "./sessions.js";
 
 // A price can never fall below this fraction of its starting price.
 const PRICE_FLOOR_FRACTION = 0.2;
@@ -48,6 +49,7 @@ export class MarketSimulator {
   // Per-instrument facts, indexed by instrument id. Prices are integers in the instrument's own scale
   // (10^decimals units per real price unit), and every price sits on a multiple of the tick.
   private readonly references: InstrumentReference[] = [];
+  private readonly markets: Market[] = []; // the market each instrument trades on
   private readonly tickUnits: number[] = []; // the tick size, as a whole number of wire units (e.g. 5 for a 0.005 tick at 3 decimals)
   private readonly minBids: number[] = []; // the price floor, in wire units
   // How many updates per second each instrument gets (its share of the total, by activity weight). Used to make the
@@ -84,6 +86,7 @@ export class MarketSimulator {
       const prevClose = toTick(mid * (1 + clamp(this.rng.gauss() * PREV_CLOSE_SPREAD, -PREV_CLOSE_MAX_MOVE, PREV_CLOSE_MAX_MOVE)));
 
       this.tickUnits.push(tick);
+      this.markets.push(marketOfClass(classIndexFor(id)));
       this.minBids.push(toTick(mid * PRICE_FLOOR_FRACTION));
       this.references.push({
         id,
@@ -208,9 +211,14 @@ export class MarketSimulator {
     }
   }
 
+  /** The market an instrument trades on. */
+  marketOf(id: number): Market {
+    return this.markets[id]!;
+  }
+
   /** Mutate `count` instruments (the more active ones more often) and return what changed. */
   step(count: number, now: number): QuoteUpdate[] {
-    const out: QuoteUpdate[] = new Array(count);
+    const out: QuoteUpdate[] = [];
     for (let i = 0; i < count; i++) {
       const q = this.pickInstrument();
       // random move in whole ticks (bell curve, ~2 ticks), clamped so the bid stays at or above the floor
@@ -231,7 +239,7 @@ export class MarketSimulator {
         }
       }
       q.ts = now;
-      out[i] = {
+      out.push({
         id: q.id,
         bid: q.bid,
         ask: q.ask,
@@ -240,7 +248,7 @@ export class MarketSimulator {
         last: q.last,
         vol: q.vol,
         ts: q.ts,
-      };
+      });
     }
     return out;
   }

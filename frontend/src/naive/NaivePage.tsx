@@ -10,6 +10,7 @@ import { Hud, RecordButton } from "../hud/Hud";
 import { useHud } from "../hud/useHud";
 import { useT } from "../i18n/useT";
 import { ChaosPanel } from "../chaos/ChaosPanel";
+import type { SessionInfo } from "../protocol/messages";
 import { ConnectionStatus } from "../components/ConnectionStatus";
 import { RfqModal } from "../rfq/RfqModal";
 import type { RfqPort } from "../rfq/bridge";
@@ -29,6 +30,7 @@ interface SelectedChartProps {
   quote: Quote | undefined;
   instrument: InstrumentReference | undefined;
   data: number[] | null;
+  session: SessionInfo | undefined;
   range: HistoryRange;
   onRangeChange: (range: HistoryRange) => void;
   book: Book;
@@ -41,7 +43,7 @@ interface SelectedChartProps {
 }
 
 /** The panel with the open symbol's chart: its skeleton until the page knows the symbol, then the panel itself. */
-function SelectedChart({ quote, instrument, data, range, onRangeChange, book, rfq, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
+function SelectedChart({ quote, instrument, data, session, range, onRangeChange, book, rfq, unavailable, inWatchlist, onToggleWatchlist, onClose, takeFocus }: SelectedChartProps) {
   const { locale } = useIntl();
   if (!quote || !instrument) return <SymbolDetailSkeleton />;
   return (
@@ -57,11 +59,11 @@ function SelectedChart({ quote, instrument, data, range, onRangeChange, book, rf
       takeFocus={takeFocus}
       range={range}
       onRangeChange={onRangeChange}
-      side={<BookPanel depth={book.depth} tape={book.tape} decimals={instrument.decimals} />}
+      side={<BookPanel depth={book.depth} tape={book.tape} decimals={instrument.decimals} timeZone={session?.timeZone} />}
       ticket={<RfqModal key={quote.id} port={rfq} instrumentId={quote.id} symbol={quote.sym} decimals={instrument.decimals} />}
       price={<PriceLine summary={priceSummary(data ?? undefined, instrument.decimals, baselineFor(range, data, instrument.prevClose), locale)} variant="big" range={range} />}
     >
-      <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} range={range} unavailable={unavailable} />
+      <NaiveChart symbol={quote.sym} decimals={instrument.decimals} prevClose={instrument.prevClose} data={data} range={range} session={session} unavailable={unavailable} />
     </SymbolDetail>
   );
 }
@@ -78,7 +80,7 @@ export function NaivePage() {
     setSelectedId(id);
   };
   const watchlist = useWatchlist();
-  const { retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids, range);
+  const { sessions, retry, chaos, reconnect, status, session, quotes, reference, referenceMissing, badVersion, charts, rangeCharts, chartUnavailable, book, rfq } = useNaiveFeed(selectedId, watchlist.ids, range);
   const hud = useHud(session, "naive");
   const selectedQuote = selectedId === null ? undefined : quotes[selectedId];
   const selectedInstrument = selectedId === null ? undefined : reference?.get(selectedId);
@@ -120,6 +122,7 @@ export function NaivePage() {
             data={(range === LIVE_RANGE ? charts[selectedId] : rangeCharts[rangeKey(selectedId, range)]) ?? null}
             range={range}
             onRangeChange={setRange}
+            session={selectedId === null ? undefined : sessions[selectedId]}
             book={book}
             rfq={rfq}
             unavailable={chartUnavailable.includes(selectedId)}

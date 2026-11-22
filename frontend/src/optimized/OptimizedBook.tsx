@@ -4,6 +4,8 @@ import type { FeedStore } from "./feedStore";
 
 interface OptimizedBookProps {
   store: FeedStore;
+  /** The open instrument, whose market's time zone times the trades. */
+  id: number;
   decimals: number;
   /** The same refresh interval and Freeze as the quotes and the charts. */
   refreshMs: number;
@@ -13,7 +15,7 @@ interface OptimizedBookProps {
  * The order book and trades tape, read from the store. Only this small component re-renders, and at most once per refresh
  * interval (every change when it is 0): the page, the quotes and the charts do not render because of a tick. 
  */
-export function OptimizedBook({ store, decimals, refreshMs }: OptimizedBookProps) {
+export function OptimizedBook({ store, id, decimals, refreshMs }: OptimizedBookProps) {
   const [view, setView] = useState({ depth: store.book, tape: store.tape });
 
   useEffect(() => {
@@ -37,5 +39,5 @@ export function OptimizedBook({ store, decimals, refreshMs }: OptimizedBookProps
     };
   }, [store, refreshMs]);
 
-  return <BookPanel depth={view.depth} tape={view.tape} decimals={decimals} />;
+  return <BookPanel depth={view.depth} tape={view.tape} decimals={decimals} timeZone={store.session(id)?.timeZone} />;
 }

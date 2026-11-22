@@ -1,4 +1,4 @@
-import type { ChaosAction, DepthLevel, HistoryRange, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, Trade } from "../protocol/messages";
+import type { ChaosAction, DepthLevel, HistoryRange, InstrumentReference, Quote, RfqQuote, RfqRequest, RfqResult, Session, SessionInfo, Trade } from "../protocol/messages";
 
 /** Where the connection stands. */
 export type FeedStatus = "connecting" | "live" | "reconnecting" | "closed" | "error";
@@ -21,6 +21,8 @@ export interface ChartUpdate {
   id: number;
   /** Which range this chart is (the last five minutes when absent). */
   range?: HistoryRange;
+  /** The instrument's market at the time (sent with the longer ranges): which session a day is, and its time zone. */
+  session?: SessionInfo;
   data: Float64Array;
 }
 
@@ -64,3 +66,4 @@ export type WorkerEvent =
   | { type: "rfqQuote"; quote: RfqQuote } // the dealer's quote for a request
   | { type: "rfqResult"; result: RfqResult } // how a request ended
   | { type: "reconnect"; attempt: number; retryAt: number }; // the connection was lost: the next attempt is number `attempt`, made at time `retryAt` (ms, like Date.now())
+

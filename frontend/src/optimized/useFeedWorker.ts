@@ -76,6 +76,13 @@ export function reduceWorkerEvent(state: FeedWorkerState, event: WorkerEvent): F
   }
 }
 
+/** What goes to the ticket (the dealer's replies, a lost connection), apart from the store and the page's state. */
+function forwardMessage(message: WorkerEvent, bridge: RfqBridge): void {
+  if (message.type === "rfqQuote") bridge.emit({ type: "quote", quote: message.quote });
+  else if (message.type === "rfqResult") bridge.emit({ type: "result", result: message.result });
+  else if (message.type === "status" && message.status !== "live" && message.status !== "connecting") bridge.emit({ type: "disconnected" });
+}
+
 const NO_IDS: number[] = []; // a stable empty list, so a page with no watchlist does not look like it changed
 
 /** How often rows that have gone quiet are marked as stale. */
@@ -103,7 +110,13 @@ export function useFeedWorker(
   selectedId: number | null = null,
   watchlist: number[] = NO_IDS,
   range: HistoryRange = LIVE_RANGE,
-): { state: FeedWorkerState; store: FeedStore; rfq: RfqPort; retry: () => void; chaos: (action: ChaosAction, value?: number) => void } {
+): {
+  state: FeedWorkerState;
+  store: FeedStore;
+  rfq: RfqPort;
+  retry: () => void;
+  chaos: (action: ChaosAction, value?: number) => void;
+} {
   const createWorker = useWorkerFactory();
   const [state, setState] = useState<FeedWorkerState>(initialFeedState);
   const [store] = useState(() => new FeedStore());
@@ -131,9 +144,7 @@ export function useFeedWorker(
 
     connection.onmessage = (event) => {
       const message = event.data;
-      if (message.type === "rfqQuote") bridge.emit({ type: "quote", quote: message.quote });
-      else if (message.type === "rfqResult") bridge.emit({ type: "result", result: message.result });
-      else if (message.type === "status" && message.status !== "live" && message.status !== "connecting") bridge.emit({ type: "disconnected" });
+      forwardMessage(message, bridge);
       if (message.type === "reference") store.setReference(message.instruments, Date.now());
       else if (message.type === "snapshot") store.setSnapshot(message.quotes, Date.now());
       else if (message.type === "batch") {

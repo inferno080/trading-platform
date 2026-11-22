@@ -14,6 +14,7 @@ import {
   type RfqRequest,
   type ServerMessage,
   type Session,
+  type SessionInfo,
   type Snapshot,
   type Trade,
 } from "../protocol/messages";
@@ -65,6 +66,7 @@ export class FeedConnection {
   private rangeSeries = new Map<string, number[]>(); // the open instrument's longer charts, by instrument and range: the flat [time, price, ...] list
   private changedRanges = new Set<string>(); // longer charts that changed since the last pull
   private requestedRanges = new Set<string>(); // longer charts asked for on this connection
+  private sessions = new Map<number, SessionInfo>(); // the market session each open instrument's longer charts were made for, until sent
   private url = "";
   private readonly reconnector: Reconnector;
 
@@ -177,6 +179,7 @@ export class FeedConnection {
     const prefix = this.selectedId === null ? null : `${this.selectedId}:`;
     for (const key of [...this.rangeSeries.keys()]) if (!prefix || !key.startsWith(prefix)) this.rangeSeries.delete(key);
     for (const key of [...this.requestedRanges]) if (!prefix || !key.startsWith(prefix)) this.requestedRanges.delete(key);
+    for (const id of [...this.sessions.keys()]) if (id !== this.selectedId) this.sessions.delete(id);
   }
 
   /** Ask for the open instrument's chart over the chosen range, once (the last five minutes is handled with the tracked charts). */
@@ -257,7 +260,8 @@ export class FeedConnection {
     for (const key of this.changedRanges) {
       const data = this.rangeSeries.get(key);
       const [id, range] = key.split(":");
-      if (data) charts.push({ id: Number(id), range: range as HistoryRange, data: Float64Array.from(data) });
+      const session = this.sessions.get(Number(id));
+      if (data) charts.push({ id: Number(id), range: range as HistoryRange, ...(session ? { session } : {}), data: Float64Array.from(data) });
     }
     this.changedRanges.clear();
     return charts;
@@ -272,6 +276,7 @@ export class FeedConnection {
     this.changedSeries.clear();
     this.rangeSeries.clear();
     this.changedRanges.clear();
+    this.sessions.clear();
     this.requestedRanges.clear();
     this.requested.clear();
     this.subscribed.clear();
@@ -386,6 +391,9 @@ export class FeedConnection {
     const key = rangeKey(message.id, message.range);
     this.rangeSeries.set(key, flatten(message.points));
     this.changedRanges.add(key);
+    if (message.session) {
+      this.sessions.set(message.id, message.session);
+    }
   }
 
   /** The open instrument's longer charts follow its price: their newest point shows the live price. */

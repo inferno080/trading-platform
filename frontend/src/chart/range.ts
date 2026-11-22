@@ -1,4 +1,4 @@
-import { HISTORY_RANGES, type HistoryRange } from "../protocol/messages";
+import { HISTORY_RANGES, type HistoryRange, type SessionInfo } from "../protocol/messages";
 
 export { HISTORY_RANGES };
 export type { HistoryRange };
@@ -29,3 +29,14 @@ export function baselineFor(range: HistoryRange, data: ArrayLike<number> | null 
 
 /** Whether the dotted line is the previous close (so it is labelled that), or the start of the range. */
 export const baselineIsPrevClose = usesPrevClose;
+
+/**
+ * How a chart is drawn for the market it belongs to: its times are written on the market's own clock (the live trades are
+ * too), and a one-day chart of an exchange reaches the session's close even before the close has come, so the line stops
+ * where "now" is; after the close the axis runs on to the end of the data. `dataEnd` is the time of the newest point.
+ */
+export function sessionView(range: HistoryRange, session: SessionInfo | undefined, dataEnd: number): { timeZone?: string; domain?: { start: number; end: number } } {
+  if (!session || range === LIVE_RANGE) return {};
+  if (range === "1d" && !session.continuous) return { timeZone: session.timeZone, domain: { start: session.open, end: Math.max(session.close, dataEnd) } };
+  return { timeZone: session.timeZone };
+}

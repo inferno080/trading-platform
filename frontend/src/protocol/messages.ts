@@ -103,10 +103,24 @@ export const HISTORY_RANGES = ["5m", "1d", "1m", "1y", "ytd", "max"] as const;
 export type HistoryRange = (typeof HISTORY_RANGES)[number];
 
 /** Price history of one instrument, oldest first: [epoch ms, last price as a wire integer]. Sent in reply to a HistoryRequest; `range` says which range it is. */
+/** The markets instruments trade on: US, European and Japanese equities, and round-the-clock FX. */
+export type Market = "us" | "eu" | "jp" | "fx";
+
+/** One market's session at some moment: all times are epoch ms, and the session is the open one, or else the last that ended. */
+export interface SessionInfo {
+  market: Market;
+  timeZone: string; // IANA name, such as "America/New_York"
+  continuous: boolean; // trades round the clock, so there is no open or close (the session is the last 24 hours)
+  open: number;
+  close: number;
+}
+
 export interface HistoryData {
   t: "history";
   id: number;
   range: HistoryRange;
+  /** The instrument's market at the time (not sent for the five-minute range): for a day, the session the series is of. */
+  session?: SessionInfo;
   points: [ts: number, price: number][];
 }
 

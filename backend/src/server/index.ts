@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { MarketSimulator } from "../sim/marketSimulator.js";
 import { History } from "../sim/history.js";
 import { rangeSeries } from "../sim/rangeHistory.js";
+import { sessionAt } from "../sim/sessions.js";
 import { decodeClientMessage, encodeMessage } from "../protocol/codec.js";
 import { Chaos } from "./chaos.js";
 import { startTicker } from "./ticker.js";
@@ -122,8 +123,10 @@ const handleHistory = (ws: WebSocket, id: number, range: HistoryRange = "5m"): v
     return;
   }
   // A longer range is made up when asked: nothing is stored.
-  const points = rangeSeries({ id, range, now: Date.now(), last: sim.lastPrice(id), prevClose: sim.prevClose(id), tick: sim.screen(id)!.tick });
-  sendReply(ws, encodeMessage({ t: "history", id, range, points }));
+  const now = Date.now();
+  const session = sessionAt(sim.marketOf(id), now);
+  const points = rangeSeries({ id, range, now, last: sim.lastPrice(id), prevClose: sim.prevClose(id), tick: sim.screen(id)!.tick, session });
+  sendReply(ws, encodeMessage({ t: "history", id, range, session, points }));
 };
 
 // Abruptly ends every client connection, like a network failure. Returns how many there were.
@@ -227,7 +230,7 @@ startTicker(config.tickMs, () => {
   const frame = encodeMessage(delta);
   // The depth and trades of this tick travel with the delta: held back by latency, and lost with it by a gap.
   const deliver = (): void => {
-    broadcast(frame, updateCount);
+    broadcast(frame, delta.updates.length);
     for (const { id, frame: extraFrame } of extra) for (const ws of subs.watchers(id)) sendStreamFrame(ws, extraFrame);
   };
   const delay = chaos.deliveryDelay(now);

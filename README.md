@@ -99,7 +99,7 @@ All frames are binary MessagePack. Prices are fixed-point integers in **each ins
 - **`reference`** (client to server, then server to that client): `{ t: "reference" }` asks for the reference data, and the server replies with `{ t: "reference", instruments: [...] }`. It is opt-in, so a client that never asks sees exactly the stream it would have seen without this feature. See [Instruments and reference data](#instruments-and-reference-data).
 - **`chaos`** (client to server): `{ t: "chaos", action, value? }` asks the server to misbehave on purpose, so a client's recovery can be tested (see [Chaos commands](#chaos-commands)). Malformed messages, unknown actions and anything that is not a known client message are ignored.
 - **`subscribe` / `unsubscribe`** (client to server): `{ t: "subscribe", id }` starts two extra streams for one instrument, to that client only: **`depth`** and **`trades`**. Each client can watch up to `MAX_SUBSCRIPTIONS` instruments (5 by default); beyond that, or for an unknown id, the server replies `{ t: "rejected", request: "subscribe", id, reason }` with `reason` `"limit"` or `"unknown-instrument"`. All of a client's subscriptions end when it disconnects. See [Instrument detail](#instrument-detail-depth-trades-and-history).
-- **`history`** (client to server, then server to that client): `{ t: "history", id, range? }` asks once for an instrument's price history. `range` is one of `"5m"` (the default: the last five minutes, the real buffer, one point per `HISTORY_INTERVAL_MS`), `"1d"`, `"1m"`, `"1y"`, `"ytd"` or `"max"` (made up when asked, see [Longer ranges](#longer-ranges)). The reply is `{ t: "history", id, range, points: [[ts, price], ...] }`, oldest first. An unknown `range` is ignored like any malformed message.
+- **`history`** (client to server, then server to that client): `{ t: "history", id, range? }` asks once for an instrument's price history. `range` is one of `"5m"` (the default: the last five minutes, the real buffer, one point per `HISTORY_INTERVAL_MS`), `"1d"`, `"1m"`, `"1y"`, `"ytd"` or `"max"` (made up when asked, see [Longer ranges](#longer-ranges)). The reply is `{ t: "history", id, range, session?, points: [[ts, price], ...] }`, oldest first; `session` (every range but `5m`) says which market session the series is of: `market`, `timeZone`, `continuous`, `open` and `close`. An unknown `range` is ignored like any malformed message.
 
 - **`rfq`** (client to server): `{ t: "rfq", ref, id, side, quantity }` asks the simulated dealer for a price for a size. `ref` is the client's own number for the request, which every later message about it carries. The dealer replies with **`rfqQuote`** `{ ref, id, side, quantity, price, screenPrice, validForMs }`, or declines with **`rfqResult`** (below). See [Requests for quotes](#requests-for-quotes-rfq).
 - **`rfqAccept` / `rfqReject`** (client to server): `{ t: "rfqAccept", ref }` takes a quote, `{ t: "rfqReject", ref }` turns it down.
@@ -133,13 +133,21 @@ The real price buffer only holds five minutes, but a chart can also show a day, 
 
 | `range` | Covers | Bars |
 | --- | --- | --- |
-| `1d` | the last 24 hours | 5-minute, 289 points. It starts exactly at the previous close, so the dotted "previous close" line begins where the line does |
+| `1d` | from the instrument's most recent session open to now; for FX the last 24 hours | 5-minute bars. It starts exactly at the previous close, so the dotted "previous close" line begins where the line does (see [Market sessions](#market-sessions)) |
 | `1m` | the last 30 days | daily, 31 points |
 | `1y` | the last 365 days | daily, 366 points |
 | `ytd` | since 1 January (UTC) | daily |
 | `max` | since the instrument "started trading" | weekly, hundreds of points |
 
 Every series is a random walk run backwards from the current price, so it **always ends at the price on the screen**. Each instrument has its own yearly volatility (15% to 60%) and its own listing date, between 2 and 25 years back, so `max` starts at a **different date for each instrument**. All of it comes from the instrument's number, so it is the same every run, and asking again a moment later gives the same shape (bar times sit on whole multiples of the bar length). Prices stay on the instrument's tick grid and never fall below one tick. The data is simulated, and the page says so beside the range buttons.
+
+### Market sessions
+
+The simulator's instruments trade on four markets, decided by their group (see [Instruments](#instruments-and-reference-data)): **US** equities (New York, 09:30 to 16:00), **EU** equities (Frankfurt, 09:00 to 17:30), **JP** equities (Tokyo, 09:00 to 15:00, the real lunch break left out) and **FX**, which trades round the clock. Each keeps its hours in its own time zone (`backend/src/sim/sessions.ts`, using the platform's IANA zone data, so daylight saving is right). Weekends are not treated specially.
+
+The **one-day chart** runs from the most recent session open (today's once the day's open has passed, otherwise yesterday's) **to now**, starting exactly at the previous close, so it always reaches the live price and agrees with the timestamps of the live trades. Before the close the line stops partway and the time axis still reaches the close (the right side is empty); after the close, or at a weekend, the line runs on past the close, since the feed does not stop. FX has no session, so its day is the last 24 hours. The reply carries the session (`market`, `timeZone`, `continuous`, `open`, `close`), and the page uses it for the time zone that times are written in and for how far the time axis reaches. The chart and the trades tape are written on the **market's own clock** (the tape's heading says which, for example "Time (EST)"), so they always agree.
+
+**Market hours are not enforced.** The live feed keeps moving at all hours and at weekends, so the demo and the benchmark do not depend on whether the real exchanges happen to be open. The sessions only decide what a one-day chart covers.
 
 ### Requests for quotes (RFQ)
 

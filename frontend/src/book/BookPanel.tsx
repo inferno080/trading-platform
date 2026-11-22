@@ -1,7 +1,7 @@
 import { useIntl } from "react-intl";
 import { BookSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
-import { decimalFormatter, integerFormatter, timeFormatter } from "../lib/format";
+import { decimalFormatter, integerFormatter, timeFormatter, timeZoneName } from "../lib/format";
 import type { Depth, DepthLevel, Trade } from "../protocol/messages";
 
 /** Levels shown on each side of the order book. The server sends more; this is what fits comfortably. */
@@ -52,12 +52,12 @@ function OrderBook({ bids, asks, decimals }: { bids: DepthLevel[]; asks: DepthLe
 }
 
 /** The most recent trades, newest first. The side is written out (Buy, Sell) as well as colored. */
-function TradeTape({ trades, decimals }: { trades: Trade[]; decimals: number }) {
+function TradeTape({ trades, decimals, timeZone }: { trades: Trade[]; decimals: number; timeZone?: string }) {
   const t = useT();
   const { locale } = useIntl();
   const price = decimalFormatter(locale, decimals);
   const integer = integerFormatter(locale);
-  const time = timeFormatter(locale);
+  const time = timeFormatter(locale, timeZone);
   const scale = 10 ** decimals;
 
   if (trades.length === 0) return <p className="book-empty">{t("tape.empty")}</p>;
@@ -66,7 +66,7 @@ function TradeTape({ trades, decimals }: { trades: Trade[]; decimals: number }) 
       <caption className="visually-hidden">{t("tape.caption")}</caption>
       <thead>
         <tr>
-          <th scope="col">{t("tape.time")}</th>
+          <th scope="col">{timeZone ? t("tape.timeZone", { zone: timeZoneName(locale, timeZone) }) : t("tape.time")}</th>
           <th scope="col">{t("tape.price")}</th>
           <th scope="col">{t("tape.size")}</th>
           <th scope="col">{t("tape.side")}</th>
@@ -92,10 +92,12 @@ interface BookPanelProps {
   depth: Pick<Depth, "bids" | "asks"> | null;
   tape: Trade[];
   decimals: number;
+  /** The market's time zone, so the trades are timed on the same clock as the chart; the browser's clock when absent. */
+  timeZone?: string;
 }
 
 /** The order book and the trades tape of the open symbol, side by side (one above the other on a narrow screen). */
-export function BookPanel({ depth, tape, decimals }: BookPanelProps) {
+export function BookPanel({ depth, tape, decimals, timeZone }: BookPanelProps) {
   const t = useT();
   if (!depth) return <BookSkeleton />; // until the first order book arrives
   return (
@@ -106,7 +108,7 @@ export function BookPanel({ depth, tape, decimals }: BookPanelProps) {
       </section>
       <section aria-labelledby="tape-title">
         <h3 id="tape-title">{t("tape.title")}</h3>
-        <TradeTape trades={tape} decimals={decimals} />
+        <TradeTape trades={tape} decimals={decimals} timeZone={timeZone} />
       </section>
     </div>
   );

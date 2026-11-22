@@ -3,7 +3,7 @@ import { useIntl } from "react-intl";
 import { drawChart, readChartColors } from "../chart/drawChart";
 import { useCanvasSize, useThemeVersion } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
-import { baselineFor, baselineIsPrevClose, LIVE_RANGE, type HistoryRange } from "../chart/range";
+import { baselineFor, baselineIsPrevClose, LIVE_RANGE, sessionView, type HistoryRange } from "../chart/range";
 import { ChartSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
 import type { FeedStore } from "./feedStore";
@@ -58,7 +58,7 @@ export function OptimizedChart({ store, id, symbol, decimals, prevClose, unavail
       }
       const baseline = baselineFor(range, data, prevClose);
       const baselineLabel = t(baselineIsPrevClose(range) ? "table.prevClose" : "chart.rangeStart");
-      drawChart(context, data, { ...size, decimals, locale, range, hoverX: hoverX.current, prevClose: baseline, prevCloseLabel: baselineLabel }, readChartColors());
+      drawChart(context, data, { ...size, decimals, locale, range, ...sessionView(range, store.session(id), data[data.length - 2]!), hoverX: hoverX.current, prevClose: baseline, prevCloseLabel: baselineLabel }, readChartColors());
       drawnAt = performance.now();
       setPainted(true);
       if (performance.now() - labelledAt > LABEL_EVERY_MS) {
