@@ -272,21 +272,24 @@ describe("NaivePage and its live feed", () => {
     cy.get("[role=alert]").should("contain.text", "Unsupported protocol version 1");
   });
 
-  it("reports a connection error, and keeps reporting it after the socket closes", () => {
+  it("reconnects when a connection fails to open, saying which attempt it is", () => {
     mountPage();
-    cy.then(() => socket().fail());
-    cy.get(".status").should("have.attr", "data-status", "error").and("contain.text", "Connection error");
-    cy.then(() => socket().drop());
-    cy.get(".status").should("have.attr", "data-status", "error");
+    cy.then(() => {
+      socket().fail();
+      socket().drop();
+    });
+    cy.get(".status").should("have.attr", "data-status", "reconnecting").and("contain.text", "Reconnecting (attempt 1)");
   });
 
-  it("reports a clean disconnect when the server closes the connection", () => {
+  it("reconnects when the server closes the connection, and says so with a countdown and a way to retry at once", () => {
     mountPage();
     cy.then(() => {
       socket().open();
       socket().drop();
     });
-    cy.get(".status").should("have.attr", "data-status", "closed").and("contain.text", "Disconnected");
+    cy.get(".status").should("have.attr", "data-status", "reconnecting").and("contain.text", "Reconnecting");
+    cy.get(".reconnect-countdown").should("contain.text", "next try in");
+    cy.contains("button", "Retry now").should("exist");
   });
 
   it("closes its connection and stops listening when the page is removed", () => {
@@ -707,6 +710,85 @@ describe("NaivePage: the watchlist", () => {
       });
       cy.get("table.book").should("not.exist");
       cy.get("table.tape").should("not.exist");
+    });
+  });
+
+  describe("reconnecting", () => {
+    const connections = () => FakeWebSocket.instances.length;
+
+    it("opens a new connection by itself after the wait, and is live again when it works", () => {
+      goLive();
+      cy.then(() => socket().drop());
+      cy.get(".status").should("have.attr", "data-status", "reconnecting");
+      cy.wrap(null, { timeout: 4000 }).should(() => expect(connections()).to.equal(2)); // the first wait is about a second at most
+      cy.get(".status").should("have.attr", "data-status", "connecting");
+      cy.then(() => {
+        socket().open();
+        socket().receive(makeSession());
+      });
+      cy.get(".status").should("have.attr", "data-status", "live");
+      cy.contains("button", "Retry now").should("not.exist");
+    });
+
+    it("tries at once when Retry now is pressed", () => {
+      goLive();
+      cy.then(() => socket().drop());
+      cy.contains("button", "Retry now").click();
+      cy.wrap(null).should(() => expect(connections()).to.equal(2));
+      cy.get(".status").should("have.attr", "data-status", "connecting");
+    });
+
+    it("asks again for the reference data, a snapshot, and the open chart on the new connection", () => {
+      goLive();
+      cy.then(() => socket().drop());
+      cy.contains("button", "Retry now").click();
+      cy.then(() => {
+        socket().open();
+        socket().receive(makeSession());
+      });
+      cy.wrap(null).should(() => expect(allSentTypes()).to.include.members(["reference", "history", "subscribe"]));
+    });
+
+    it("keeps the last prices on screen while it reconnects", () => {
+      goLive();
+      cy.then(() => socket().drop());
+      cy.get("tbody tr").should("have.length", 3);
+    });
+
+    it("does not reconnect to a server speaking another protocol", () => {
+      mountPage();
+      cy.then(() => {
+        socket().open();
+        socket().receive(makeSession({ v: 1 }));
+      });
+      cy.get(".status").should("have.attr", "data-status", "error");
+      cy.wrap(null).should(() => expect(connections()).to.equal(1));
+    });
+
+    it("stops trying when the page is removed", () => {
+      goLive();
+      cy.then(() => socket().drop());
+      cy.mount(<p>elsewhere</p>);
+      cy.wrap(null).then(() => expect(connections()).to.equal(1));
+    });
+  });
+
+  describe("chaos controls", () => {
+    const sentChaos = () => socket().sent.map((frame) => decode(frame) as { t: string; action?: string; value?: number }).filter((m) => m.t === "chaos");
+
+    it("sends the chosen fault over the page's own connection", () => {
+      goLive();
+      cy.contains("summary", "Chaos controls").click();
+      cy.contains("button", "Pause the feed").click();
+      cy.contains(".chaos-row", "Add latency").find("input").clear().type("250");
+      cy.contains("button", "Add latency").click();
+      cy.wrap(null).should(() => expect(sentChaos()).to.deep.equal([{ t: "chaos", action: "pause" }, { t: "chaos", action: "latency", value: 250 }]));
+    });
+
+    it("is disabled until the connection is live", () => {
+      mountPage();
+      cy.contains("summary", "Chaos controls").click();
+      cy.get(".chaos-row button").first().should("be.disabled");
     });
   });
 });

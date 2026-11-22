@@ -167,7 +167,7 @@ The previous close is the starting price moved by about 1% (never more than 5%),
 
 The server can be told to misbehave on purpose, so you can watch how a client copes. Commands affect **every connected client**, not just the sender, which is what lets a second terminal disturb your browser tab. This is a local development server with no authentication, so any connected client can send them.
 
-Send one from a second terminal while the backend runs:
+The page has the same commands as buttons (see **Chaos controls** under [Frontend](#frontend)). Or send one from a second terminal while the backend runs:
 
 ```bash
 cd backend
@@ -214,6 +214,7 @@ frontend/src/
   shell/         accessible tab bar, hash routing (#/optimized, #/naive) and the loading and error handling for each tab
   feed/          the Web Worker that owns the connection, and the logic inside it (FeedConnection)
   chart/         the price chart shared by both tabs: data helpers, canvas drawing, the detail panel
+  chaos/         the chaos controls panel (buttons that make the server misbehave on purpose)
   rfq/           the request-for-quote ticket: its state machine, the port it talks through, and the dialog
   watchlist/     the watchlist panel, its saved state, the toast and the 70/30 layout
   optimized/     the optimized version (the default tab): the store the worker feeds, the per-row redraw limit, and the AG Grid
@@ -262,6 +263,10 @@ When the quote arrives, the ticket shows it in words ("You buy 4,888 AAA at 303.
 It works with the keyboard alone: Enter in the quantity box sends the request, **Escape turns an open quote down** (and the next Escape closes the dialog), and the dialog keeps focus inside it and gives it back to the button when it closes. When something happens, focus moves to the status, never onto Accept, so a stray Enter cannot trade. A polite live region reads out the quote once when it arrives and warns once when 3 seconds are left.
 
 Both tabs show the same ticket through a small `RfqPort` (request, accept, reject, and a way to listen). The Naive tab sends from the page's own connection; the Optimized tab asks its worker, which owns the connection, and the worker passes the dealer's replies back. On the Naive tab the dealer's reply waits in the same queue as the price updates, behind the page's backlog, so it can arrive late; that is one more thing the worker fixes.
+
+**Reconnecting.** If the connection is lost, or never opens, both tabs try again by themselves, using the same policy (`frontend/src/feed/reconnect.ts`): the wait starts at 1 second and doubles after each failed attempt up to 15 seconds, and half of each wait is random, so many clients cut off together do not all come back at the same instant (and a struggling server is not hammered). A connection that works (the server's `session` arrives) starts the count again. The status shows **Reconnecting (attempt 3)** with a countdown to the next try and a **Retry now** button; the countdown is for the eyes only (it is hidden from screen readers, who hear the state and the attempt number when they change). On the Optimized tab the policy runs inside the worker, which owns the connection; on the Naive tab it runs in the page, next to its own socket. After a reconnect the page asks again for what a new connection knows nothing about: the reference data, a fresh snapshot, and the history and subscriptions of the open chart and the watchlist. The last prices stay on screen meanwhile (rows go stale after 5 seconds, as usual), and a request for a quote that was in progress ends as failed. A server speaking a protocol version the client does not understand is never retried, since trying again cannot help.
+
+**Chaos controls.** A collapsed **Chaos controls** section under the performance panel, on both tabs, has a button for each of the server's fault commands (see [Chaos commands](#chaos-commands)), each with a one-line explanation: pause and resume the feed, lose one frame (so the page sees a sequence gap and resyncs), drop the connection (so the page reconnects), send a burst (1 to 60 seconds, five times the normal updates) and add latency (0 to 5,000 ms). The two numbers stop at their largest value as you type. The buttons only work while the connection is live, and they affect **every** client connected to the server, so a second browser tab feels them too. The page sends them over its own connection (through the worker on the Optimized tab), and the server does not acknowledge them: "Sent: …" means the command left the page, and its effect shows in the performance panel, the status and the grid. The panel cannot tell whether a fault set by another client is active.
 
 **Watchlist.** Beside the open chart panel (the chart panel has 70% of the width and the watchlist 30%, in a row above the quotes) is a collapsible watchlist, shown or hidden with the **Watchlist** button in the toolbar. When it is collapsed the chart panel uses the whole row, and with no chart open the watchlist spans the row with its cards side by side. The quotes are below, across the full width, on both tabs. From an open chart, **Add to watchlist** puts the symbol on it (and the button becomes **Remove from watchlist**); a fifth symbol is refused with a toast ("The watchlist is full (4 symbols)…"). Each entry has a mini chart with its latest price and how far it moved over the period (an arrow as well as a color), a button that opens its full chart, and a remove button. The list is saved in the browser, so it survives a reload and is shared by both tabs. Everything is reachable by keyboard: the toggle, the add and remove buttons, each entry's buttons, and the toast's Dismiss button; after removing an entry, focus moves to the watchlist heading. The toast does not take focus, is announced politely by screen readers, and stays while the pointer or focus is on it.
 
@@ -368,7 +373,7 @@ Code quality is judged by SonarCloud's default **Sonar way** quality gate; this 
 - [x] Collapsible watchlist with mini charts and subscribe/unsubscribe, on both tabs
 - [x] Order book and trades tape for the open symbol, on both tabs
 - [x] RFQ ticket with a state machine, and a simulated dealer on the backend
-- [ ] Reconnect with a connection state machine, and chaos controls in the UI
+- [x] Reconnect with backoff, and chaos controls in the UI
 - [ ] More languages (de-DE, Arabic right-to-left)
 - [ ] Chart ranges: 1D, 1M, 1Y and YTD (simulated history, generated on request)
 - [x] Drift-corrected simulator timing

@@ -499,4 +499,62 @@ describe("OptimizedPage: the watchlist", () => {
       cy.get("table.tape tbody tr").should("have.length", 2).first().should("have.class", "tape-sell");
     });
   });
+
+  describe("reconnecting", () => {
+    it("shows which attempt is next, with a countdown, and asks the worker to retry now when told to", () => {
+      mountPage();
+      deliverMarket();
+      worker().then((w) => {
+        w.emit({ type: "status", status: "reconnecting" });
+        w.emit({ type: "reconnect", attempt: 2, retryAt: Date.now() + 4000 });
+      });
+      cy.get(".status").should("have.attr", "data-status", "reconnecting").and("have.text", "Reconnecting (attempt 2)");
+      cy.get(".reconnect-countdown").should("contain.text", "next try in");
+      cy.contains("button", "Retry now").click();
+      worker().then((w) => expect(w.posted.some((command) => command.type === "retry")).to.equal(true));
+    });
+
+    it("goes back to live, and drops the countdown, when the worker reconnects", () => {
+      mountPage();
+      deliverMarket();
+      worker().then((w) => {
+        w.emit({ type: "status", status: "reconnecting" });
+        w.emit({ type: "reconnect", attempt: 1, retryAt: Date.now() + 1000 });
+        w.emit({ type: "status", status: "live" });
+      });
+      cy.get(".status").should("have.attr", "data-status", "live");
+      cy.get(".reconnect-countdown").should("not.exist");
+    });
+
+    it("keeps the grid on screen while it reconnects", () => {
+      mountPage();
+      deliverMarket();
+      worker().then((w) => w.emit({ type: "status", status: "reconnecting" }));
+      cy.get(".ag-row[row-id]").should("have.length", 3);
+    });
+  });
+
+  describe("chaos controls", () => {
+    it("asks the worker to send the chosen fault, with its number when it has one", () => {
+      mountPage();
+      deliverMarket();
+      cy.contains("summary", "Chaos controls").click();
+      cy.contains("button", "Drop the connection").click();
+      cy.contains(".chaos-row", "Send a burst").find("input").clear().type("8");
+      cy.contains("button", "Send a burst").click();
+      worker().then((w) => {
+        const chaos = w.posted.filter((command) => command.type === "chaos");
+        expect(chaos).to.deep.equal([
+          { type: "chaos", action: "drop", value: undefined },
+          { type: "chaos", action: "burst", value: 8 },
+        ]);
+      });
+    });
+
+    it("is disabled while the connection is not live", () => {
+      mountPage();
+      cy.contains("summary", "Chaos controls").click();
+      cy.get(".chaos-row button").first().should("be.disabled");
+    });
+  });
 });

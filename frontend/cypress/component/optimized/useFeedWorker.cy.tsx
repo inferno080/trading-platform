@@ -34,6 +34,22 @@ describe("reduceWorkerEvent", () => {
     expect(state).to.deep.include({ status: "live", session });
   });
 
+  it("records which reconnection attempt is next while the connection is down, and forgets it once it is back", () => {
+    const down = reduceWorkerEvent(reduceWorkerEvent(initialFeedState, { type: "status", status: "reconnecting" }), {
+      type: "reconnect",
+      attempt: 2,
+      retryAt: 5000,
+    });
+    expect(down).to.deep.include({ status: "reconnecting", reconnect: { attempt: 2, retryAt: 5000 } });
+    expect(reduceWorkerEvent(down, { type: "status", status: "connecting" }).reconnect).to.equal(null);
+    expect(reduceWorkerEvent(down, { type: "status", status: "live" }).reconnect).to.equal(null);
+  });
+
+  it("keeps the attempt when the status is repeated while still reconnecting", () => {
+    const down = reduceWorkerEvent(initialFeedState, { type: "reconnect", attempt: 1, retryAt: 100 });
+    expect(reduceWorkerEvent(down, { type: "status", status: "reconnecting" }).reconnect).to.deep.equal({ attempt: 1, retryAt: 100 });
+  });
+
   it("records an unsupported protocol version", () => {
     expect(reduceWorkerEvent(initialFeedState, { type: "badVersion", version: 1 }).badVersion).to.equal(1);
   });
