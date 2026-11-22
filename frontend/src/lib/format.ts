@@ -28,6 +28,7 @@ const cached = (key: string, create: () => Intl.NumberFormat): Intl.NumberFormat
 };
 
 const timeFormats = new Map<string, Intl.DateTimeFormat>();
+const zoneNameFormats = new Map<string, Intl.DateTimeFormat>();
 
 /** Formats a time of day with seconds, such as "03:51:06 PM" or "15:51:06", on the browser's clock or on a time zone's (a market's). */
 export const timeFormatter = (locale: string, timeZone?: string): Intl.DateTimeFormat => {
@@ -41,8 +42,15 @@ export const timeFormatter = (locale: string, timeZone?: string): Intl.DateTimeF
 };
 
 /** The short name of a time zone as the language writes it, such as "EST": what a clock written in that zone should say it is. */
-export const timeZoneName = (locale: string, timeZone: string): string =>
-  new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "short" }).formatToParts(Date.now()).find((part) => part.type === "timeZoneName")?.value ?? timeZone;
+export const timeZoneName = (locale: string, timeZone: string): string => {
+  const key = `${locale}|${timeZone}`;
+  let format = zoneNameFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "short" });
+    zoneNameFormats.set(key, format);
+  }
+  return format.formatToParts(Date.now()).find((part) => part.type === "timeZoneName")?.value ?? timeZone; // asked each time: summer time changes the name
+};
 
 const rangeFormats = new Map<string, Intl.DateTimeFormat>();
 

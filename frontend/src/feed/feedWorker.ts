@@ -11,15 +11,21 @@ import type { WorkerCommand, WorkerEvent } from "./messages";
 
 // The DOM typings describe a window, so the worker's own messaging API is described here instead.
 interface WorkerScope {
-  postMessage(message: WorkerEvent): void;
+  postMessage(message: WorkerEvent, transfer?: Transferable[]): void;
   onmessage: ((event: MessageEvent<WorkerCommand>) => void) | null;
   constructor: { name: string };
 }
 const scope = self as unknown as WorkerScope;
 
+/**
+ * The buffers of a batch that can move to the page instead of being copied: each chart in it is a fresh copy made to be
+ * sent, nothing here uses it afterwards, so handing the memory over saves copying it a second time.
+ */
+const transferList = (event: WorkerEvent): Transferable[] => (event.type === "batch" && event.charts ? event.charts.map((chart) => chart.data.buffer as ArrayBuffer) : []);
+
 const connection = new FeedConnection(
   (url) => new WebSocket(url),
-  (event) => scope.postMessage(event),
+  (event) => scope.postMessage(event, transferList(event)),
 );
 
 scope.onmessage = (event) => {

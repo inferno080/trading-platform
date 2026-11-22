@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useIntl } from "react-intl";
-import { readChartColors } from "../chart/drawChart";
-import { useCanvasSize, useThemeVersion } from "../chart/hooks";
+import { useCanvasSize, useChartColors } from "../chart/hooks";
 import { chartLabel } from "../chart/label";
 import { priceSummary } from "../chart/price";
 import { drawSparkline } from "../chart/sparkline";
@@ -18,13 +17,13 @@ export function NaiveMiniChart({ symbol, decimals, prevClose, data }: { symbol: 
   const { locale } = useIntl();
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(canvas);
-  const themeVersion = useThemeVersion();
+  const colors = useChartColors();
 
   useEffect(() => {
     const context = canvas.current?.getContext("2d");
     if (!context || !data || size.width === 0) return;
-    drawSparkline(context, data, size, readChartColors(), prevClose);
-  }, [data, size, themeVersion, prevClose]);
+    drawSparkline(context, data, size, colors, prevClose);
+  }, [data, size, colors, prevClose]);
 
   return (
     <div className="mini-chart">

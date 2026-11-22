@@ -36,7 +36,7 @@ export type RecordState =
   | { status: "recording"; phase: "warmup" | "measuring"; remaining: number }
   | { status: "done"; fileName: string; tabHidden: boolean; refreshChanged: boolean };
 
-export type RecordingInProgress = Extract<RecordState, { status: "recording" }>;
+type RecordingInProgress = Extract<RecordState, { status: "recording" }>;
 
 /**
  * Count one more second of a run: note if the tab was hidden or the refresh interval was changed, and keep the

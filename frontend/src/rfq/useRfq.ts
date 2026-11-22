@@ -12,7 +12,7 @@ export const ANSWER_TIMEOUT_MS = 8000;
 // Request ids only need to be different from each other, within a connection; a changing start keeps a new page from reusing the last one's.
 let nextRef = Date.now() % 1_000_000_000;
 
-export interface Rfq {
+interface Rfq {
   state: RfqState;
   /** Milliseconds left on the open quote (0 when there is none). */
   remainingMs: number;

@@ -1,5 +1,5 @@
 /** Feed counters for one sampling window, taken (and reset) by the HUD once a second. */
-export interface FeedWindow {
+interface FeedWindow {
   messages: number; // delta frames applied
   updates: number; // quote updates inside those frames
   latencies: number[]; // ms from server send time to arrival in the browser

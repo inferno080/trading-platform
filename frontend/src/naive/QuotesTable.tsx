@@ -3,7 +3,7 @@ import { TableSkeleton } from "../components/skeletons";
 import { useT } from "../i18n/useT";
 import { integerFormatter, percentFormatter, priceFormatter } from "../lib/format";
 import type { InstrumentReference, Quote } from "../protocol/messages";
-import type { ReferenceById } from "./useNaiveFeed";
+import type { ReferenceById } from "./feedState";
 
 interface QuotesTableProps {
   quotes: Quote[];

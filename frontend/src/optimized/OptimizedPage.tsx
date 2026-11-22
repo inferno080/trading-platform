@@ -1,22 +1,20 @@
 import { useState } from "react";
-import { DEFAULT_RANGE, type HistoryRange } from "../chart/range";
-import { SymbolDetail } from "../chart/SymbolDetail";
+import { InstrumentPanel, type ChartControls } from "../chart/InstrumentPanel";
+import { useOpenChart } from "../chart/useOpenChart";
+import { ChaosPanel } from "../chaos/ChaosPanel";
+import { ConnectionStatus } from "../components/ConnectionStatus";
+import { FeedAlerts } from "../components/FeedAlerts";
 import { MiniChartLoading, SymbolDetailSkeleton, TableSkeleton } from "../components/skeletons";
-import { Hud, RecordButton } from "../hud/Hud";
+import { ToolbarEnd } from "../components/ToolbarEnd";
+import { Hud } from "../hud/Hud";
 import { useHud } from "../hud/useHud";
 import { useT } from "../i18n/useT";
-import { PROTOCOL_VERSION } from "../protocol/messages";
+import type { RfqPort } from "../rfq/bridge";
 import { Toast } from "../watchlist/Toast";
 import { useWatchlist } from "../watchlist/useWatchlist";
 import { WatchlistPanel, type WatchlistItem } from "../watchlist/WatchlistPanel";
-import { WatchlistToggle } from "../watchlist/WatchlistToggle";
 import { Workspace } from "../watchlist/Workspace";
 import type { FeedStore } from "./feedStore";
-import { FIRST_INSTRUMENT } from "../chart/series";
-import { ChaosPanel } from "../chaos/ChaosPanel";
-import { ConnectionStatus } from "../components/ConnectionStatus";
-import { RfqModal } from "../rfq/RfqModal";
-import type { RfqPort } from "../rfq/bridge";
 import { OptimizedBook } from "./OptimizedBook";
 import { OptimizedChart } from "./OptimizedChart";
 import { OptimizedMiniChart } from "./OptimizedMiniChart";
@@ -61,50 +59,22 @@ interface Display {
 }
 
 /** The panel with the price chart of one instrument, once the page knows its symbol and reference data. */
-function SelectedChart({
-  display,
-  id,
-  unavailable,
-  inWatchlist,
-  onToggleWatchlist,
-  onClose,
-  takeFocus,
-  range,
-  onRangeChange,
-}: {
-  display: Display;
-  id: number;
-  range: HistoryRange;
-  onRangeChange: (range: HistoryRange) => void;
-
-  unavailable: boolean;
-  inWatchlist: boolean;
-  onToggleWatchlist: () => void;
-  onClose: () => void;
-  takeFocus: boolean;
-}) {
+function SelectedChart({ display, id, ...controls }: ChartControls & { display: Display; id: number }) {
   const { store, refreshMs } = display;
   const row = store.row(id);
   const instrument = store.instrument(id);
   if (!row || !instrument) return null;
+  const { range, unavailable, ...panel } = controls;
   return (
-    <SymbolDetail
+    <InstrumentPanel
+      id={id}
       symbol={row.sym}
-      name={instrument.name}
-      currency={instrument.currency}
-      tickSize={instrument.tickSize}
-      decimals={instrument.decimals}
-      inWatchlist={inWatchlist}
-      onToggleWatchlist={onToggleWatchlist}
-      onClose={onClose}
-      takeFocus={takeFocus}
+      instrument={instrument}
+      rfq={display.rfq}
       range={range}
-      onRangeChange={onRangeChange}
       side={<OptimizedBook store={store} id={id} decimals={instrument.decimals} refreshMs={refreshMs} />}
-      ticket={<RfqModal key={id} port={display.rfq} instrumentId={id} symbol={row.sym} decimals={instrument.decimals} />}
-      price={
-        <OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" range={range} refreshMs={refreshMs} />
-      }
+      price={<OptimizedPriceLine store={store} id={id} decimals={instrument.decimals} prevClose={instrument.prevClose} variant="big" range={range} refreshMs={refreshMs} />}
+      {...panel}
     >
       <OptimizedChart
         key={id}
@@ -117,7 +87,7 @@ function SelectedChart({
         range={range}
         refreshMs={refreshMs}
       />
-    </SymbolDetail>
+    </InstrumentPanel>
   );
 }
 
@@ -149,15 +119,8 @@ function Watchlist({ display, ids, onOpen, onRemove }: { display: Display; ids: 
 export function OptimizedPage() {
   const t = useT();
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_REFRESH_SECONDS);
-  // The chart of the first instrument (AAA, the most active) is open from the start; `userChose` is false until the person picks one.
-  const [selectedId, setSelectedId] = useState<number | null>(FIRST_INSTRUMENT);
-  const [userChose, setUserChose] = useState(false);
-  const choose = (id: number | null) => {
-    setUserChose(true);
-    setSelectedId(id);
-  };
+  const { selectedId, userChose, range, setRange, choose } = useOpenChart();
   const watchlist = useWatchlist();
-  const [range, setRange] = useState<HistoryRange>(DEFAULT_RANGE);
   const { state, store, rfq, retry, chaos } = useFeedWorker(selectedId, watchlist.ids, range);
   const { status, reconnect, session, scope, referenceCount, referenceMissing, badVersion, hasSnapshot } = state;
   const ready = hasSnapshot && referenceCount !== null;
@@ -171,15 +134,9 @@ export function OptimizedPage() {
         {/* Status is text plus a dot, so it never relies on color alone. */}
         <ConnectionStatus status={status} reconnect={reconnect} onRetry={retry} />
         <RefreshControl seconds={refreshSeconds} onChange={setRefreshSeconds} />
-        <div className="toolbar-end">
-          <RecordButton hud={hud} />
-          <WatchlistToggle open={watchlist.open} onToggle={() => watchlist.setOpen(!watchlist.open)} />
-        </div>
+        <ToolbarEnd hud={hud} watchlistOpen={watchlist.open} onToggleWatchlist={() => watchlist.setOpen(!watchlist.open)} />
       </div>
-      {badVersion !== null && (
-        <p role="alert">{t("error.protocol", { version: badVersion, expected: PROTOCOL_VERSION })}</p>
-      )}
-      {referenceMissing && <p role="alert">{t("error.referenceTimeout")}</p>}
+      <FeedAlerts badVersion={badVersion} referenceMissing={referenceMissing} />
 
       <Hud hud={hud} refreshSeconds={refreshSeconds} />
       <ChaosPanel connected={status === "live"} onSend={chaos} />
